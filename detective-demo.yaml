@@ -1194,7 +1194,7 @@ Resources:
             # creates IAM user and access key
 
             # sleep 2
-            git clone https://github.com/sheldonlsides/detective-env-demo.git
+            sudo git clone https://github.com/sheldonlsides/detective-env-demo.git
             cd detective-env-demo/
             sudo python3 ./pythonattacker.py
 
