@@ -20,18 +20,8 @@ os.environ["AWS_ACCESS_KEY_ID"] = access_key_pair.id
 os.environ["AWS_SECRET_ACCESS_KEY"] = access_key_pair.secret
 os.environ["AWS_SESSION_TOKEN"] = ""
 
-# print(f'{access_id} {secret_key}')
-# print(f'{os.environ["AWS_ACCESS_KEY_ID"]} {os.environ["AWS_SECRET_ACCESS_KEY"]}')
-
-# time.sleep(5)
-
-# session = boto3.session.Session(aws_access_key_id=access_id, 
-# aws_secret_access_key=secret_key)
-
-# print(f'session {session.get_credentials().access_key}')
-
 # add access key to seccrets manager
-secrets_manager = boto3.client('secretsmanager', region_name='us-east-2')
+secrets_manager = boto3.client('secretsmanager')
 secret_name = 'some_super_secret-' + str(some_random_number)
 
 response = secrets_manager.create_secret(
@@ -41,3 +31,11 @@ response = secrets_manager.create_secret(
 )
 
 print(response)
+
+iam = boto3.client('iam')
+
+# Delete access key
+iam.delete_access_key(
+    AccessKeyId=access_id,
+    UserName=new_user
+)
