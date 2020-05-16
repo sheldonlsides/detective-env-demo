@@ -1196,7 +1196,7 @@ Resources:
             # sleep 2
             # sudo git clone https://github.com/sheldonlsides/detective-env-demo.git
             # cd detective-env-demo/
-            # sudo python3 ./pythonattacker.py
+            # sudo python ./pythonattacker.py
 
             # internal use only - create IAM user not maintained by Isengard
             # user_info=$(aws iam create-user --user-name malicious_user-$starttime)
@@ -1247,10 +1247,11 @@ Resources:
             # set environment variables with new user access key and secret
             os.environ["AWS_ACCESS_KEY_ID"] = access_key_pair.id
             os.environ["AWS_SECRET_ACCESS_KEY"] = access_key_pair.secret
+            os.environ["AWS_SESSION_TOKEN"] =  $region
             os.environ["AWS_SESSION_TOKEN"] = ""
 
             # add access key to seccrets manager
-            secrets_manager = boto3.client('secretsmanager', region_name="'" + $region + "''")
+            secrets_manager = boto3.client('secretsmanager', region_name=new_region)
             secret_name = 'some_super_secret-' + str(some_random_number)
 
             response = secrets_manager.create_secret(
