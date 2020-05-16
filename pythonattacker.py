@@ -21,7 +21,7 @@ os.environ["AWS_SECRET_ACCESS_KEY"] = access_key_pair.secret
 os.environ["AWS_SESSION_TOKEN"] = ""
 
 # add access key to seccrets manager
-secrets_manager = boto3.client('secretsmanager')
+secrets_manager = boto3.client('secretsmanager', region_name='us-east-2')
 secret_name = 'some_super_secret-' + str(some_random_number)
 
 response = secrets_manager.create_secret(
@@ -32,10 +32,6 @@ response = secrets_manager.create_secret(
 
 print(response)
 
-iam = boto3.client('iam')
-
 # Delete access key
-iam.delete_access_key(
-    AccessKeyId=access_id,
-    UserName=new_user
-)
+iam = boto3.client('iam')
+iam.delete_access_key(AccessKeyId=access_id,UserName=new_user)
