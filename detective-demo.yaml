@@ -1191,41 +1191,6 @@ Resources:
 
             sudo sh /tmp/attackerlifecycle.sh
             
-            # creates IAM user and access key
-
-            # sleep 2
-            # sudo git clone https://github.com/sheldonlsides/detective-env-demo.git
-            # cd detective-env-demo/
-            # sudo python ./pythonattacker.py
-
-            # internal use only - create IAM user not maintained by Isengard
-            # user_info=$(aws iam create-user --user-name malicious_user-$starttime)
-            # username=$( echo $user_info|jq -r '[.User][0]| .UserName' )
-
-            # key_info=$(aws iam create-access-key --user-name $username)
-
-            # internal use only - creates access id and secret key
-            # access_id=$( echo $key_info|jq -r '[.AccessKey][0]| .AccessKeyId' ) 
-            # secret_key=$( echo $key_info|jq -r '[.AccessKey][0]| .SecretAccessKey' ) 
-
-            # internal use only - elevate users rights to managed Admin ARN
-            # aws iam attach-user-policy --user-name $username --policy-arn arn:aws:iam::aws:policy/AdministratorAccess
-
-            # change AWS environment credentials
-            # export AWS_ACCESS_KEY_ID=$access_id
-            # export AWS_SECRET_ACCESS_KEY=$secret_key
-            # export AWS_SESSION_TOKEN=""
-
-            # list users access keys
-            # aws iam list-access-keys --user-name $username
-
-            # creates new secret in secrets manaer
-            # aws secretsmanager create-secret --name some_secret_content-$starttime --secret-string $secret_key --description "Stores some user secrets" --region $region
-
-            # sleep 5
-            # Deletes IAM user access key. User will not have access to the console or CLI (security cleanup)
-            # aws iam delete-access-key --access-key-id $access_id --user-name $username
-
             cat <<EOT >> /tmp/pythonattacker.py
             import boto3, json, time, uuid, random, os
             some_random_number = str(random.randrange(100000))
@@ -1236,7 +1201,7 @@ Resources:
             user = iam.User(new_user)
             user = user.create(Path='/')
 
-            # attaches AWS managed admin role
+            # attaches AWS managed admin role to new user
             user.attach_policy(PolicyArn='arn:aws:iam::aws:policy/AdministratorAccess')
 
             # creates access key and secret id for new user
@@ -1244,7 +1209,7 @@ Resources:
             access_id = access_key_pair.id
             secret_key = access_key_pair.secret
 
-            # set environment variables with new user access key and secret
+            # set environment variables to new user access key and secret
             os.environ["AWS_ACCESS_KEY_ID"] = access_key_pair.id
             os.environ["AWS_SECRET_ACCESS_KEY"] = access_key_pair.secret
             os.environ["AWS_DEFAULT_REGION"] = "$region"
@@ -1262,6 +1227,8 @@ Resources:
 
             print(response)
 
+            print("Finished running new user attack")
+
             # Delete access key
             iam = boto3.client('iam')
             iam.delete_access_key(AccessKeyId=access_id,UserName=new_user)
@@ -1273,6 +1240,7 @@ Resources:
             echo 'Bootstrapping complete'
 
   Miner1:
+    DependsOn: BTCS3Bucket
     Type: AWS::EC2::Instance
     Properties: 
       InstanceType: c5.xlarge
@@ -1319,8 +1287,6 @@ Resources:
             cat <<EOT > /tmp/bitcoin-ping.sh
             !/bin/bash
             wget https://104.140.201.42:9000/favicon.ico --no-check-certificate | rm favicon.* >/dev/null 2>&1
-            #curl -s http://pool.minergate.com/dkjdjkjdlsajdkljalsskajdksakjdksajkllalkdjsalkjdsalkjdlkasj  > /dev/null &
-            #curl -s http://xmr.pool.minergate.com/dhdhjkhdjkhdjkhajkhdjskahhjkhjkahdsjkakjasdhkjahdjk  > /dev/null &
             EOT
 
             sudo cp /tmp/bitcoin-ping.sh /home/ec2-user/bitcoin-ping.sh
@@ -1331,64 +1297,64 @@ Resources:
             echo "*/12 * * * * /home/ec2-user/bitcoin-ping.sh > /home/ec2-user/bitcoin-ping.log 2>&1" >> cron
             sudo crontab -u ec2-user cron
   
-  Miner2:
-    Type: AWS::EC2::Instance
-    Properties: 
-      InstanceType: c5.xlarge
-      IamInstanceProfile: !Ref BitcoinInstanceProfile
-      ImageId: !Ref LatestAWSLinuxAmiId
-      # KeyName: "workshop"
-      NetworkInterfaces: 
-        - AssociatePublicIpAddress: 'true'
-          DeviceIndex: '0'
-          GroupSet:
-            - !Ref MINERSG
-          SubnetId: !Ref PublicSubnet1
-      Tags:
-        - Key: Name
-          Value: "BTC Miner 2"
-      UserData:
-        Fn::Base64: !Sub |
-            #!/bin/bash -x
-            #This can be on a AWS Linux AMI
-            exec > /tmp/part-001.log 2>&1
+  # Miner2:
+  #   Type: AWS::EC2::Instance
+  #   Properties: 
+  #     InstanceType: c5.xlarge
+  #     IamInstanceProfile: !Ref BitcoinInstanceProfile
+  #     ImageId: !Ref LatestAWSLinuxAmiId
+  #     # KeyName: "workshop"
+  #     NetworkInterfaces: 
+  #       - AssociatePublicIpAddress: 'true'
+  #         DeviceIndex: '0'
+  #         GroupSet:
+  #           - !Ref MINERSG
+  #         SubnetId: !Ref PublicSubnet1
+  #     Tags:
+  #       - Key: Name
+  #         Value: "BTC Miner 2"
+  #     UserData:
+  #       Fn::Base64: !Sub |
+  #           #!/bin/bash -x
+  #           #This can be on a AWS Linux AMI
+  #           exec > /tmp/part-001.log 2>&1
 
-            # Get Updates and Install Necessary Packages
-            sudo yum update -y -q && sudo yum upgrade -y -q
-            sudo yum install go -y -q
-            sudo yum install git -y -q
+  #           # Get Updates and Install Necessary Packages
+  #           sudo yum update -y -q && sudo yum upgrade -y -q
+  #           sudo yum install go -y -q
+  #           sudo yum install git -y -q
 
-            #Update Path
-            export PATH=$PATH:/usr/local/bin:/usr/sbin:/root/.local/bin
-            echo 'export PATH=/root/.local/bin:/usr/sbin:$PATH' >> /home/ec2-user/.profile
+  #           #Update Path
+  #           export PATH=$PATH:/usr/local/bin:/usr/sbin:/root/.local/bin
+  #           echo 'export PATH=/root/.local/bin:/usr/sbin:$PATH' >> /home/ec2-user/.profile
 
-            # install (installs in /home/ec2-user/go/bin)
-            go get -u github.com/alphasoc/flightsim/
+  #           # install (installs in /home/ec2-user/go/bin)
+  #           go get -u github.com/alphasoc/flightsim/
 
-            # Create FlightSim Miner Cron Job
-            cat <<EOT > /tmp/FlightSim-Miner.sh
-            #!/bin/bash
-            /home/ec2-user/go/bin/flightsim run miner
-            EOT
-            sudo cp /tmp/FlightSim-Miner.sh /home/ec2-user/FlightSim-Miner.sh
-            sudo chmod 744 /home/ec2-user/FlightSim-Miner.sh
-            sudo chown ec2-user /home/ec2-user/FlightSim-Miner.sh
+  #           # Create FlightSim Miner Cron Job
+  #           cat <<EOT > /tmp/FlightSim-Miner.sh
+  #           #!/bin/bash
+  #           /home/ec2-user/go/bin/flightsim run miner
+  #           EOT
+  #           sudo cp /tmp/FlightSim-Miner.sh /home/ec2-user/FlightSim-Miner.sh
+  #           sudo chmod 744 /home/ec2-user/FlightSim-Miner.sh
+  #           sudo chown ec2-user /home/ec2-user/FlightSim-Miner.sh
 
-            # Create Fake Bitcoin Cron Job
-            cat <<EOT > /tmp/bitcoin-ping.sh
-            !/bin/bash
-            wget https://104.140.201.42:9000/favicon.ico --no-check-certificate | rm favicon.* >/dev/null 2>&1
-            #curl -s http://pool.minergate.com/dkjdjkjdlsajdkljalsskajdksakjdksajkllalkdjsalkjdsalkjdlkasj  > /dev/null &
-            #curl -s http://xmr.pool.minergate.com/dhdhjkhdjkhdjkhajkhdjskahhjkhjkahdsjkakjasdhkjahdjk  > /dev/null &
-            EOT
+  #           # Create Fake Bitcoin Cron Job
+  #           cat <<EOT > /tmp/bitcoin-ping.sh
+  #           !/bin/bash
+  #           wget https://104.140.201.42:9000/favicon.ico --no-check-certificate | rm favicon.* >/dev/null 2>&1
+  #           #curl -s http://pool.minergate.com/dkjdjkjdlsajdkljalsskajdksakjdksajkllalkdjsalkjdsalkjdlkasj  > /dev/null &
+  #           #curl -s http://xmr.pool.minergate.com/dhdhjkhdjkhdjkhajkhdjskahhjkhjkahdsjkakjasdhkjahdjk  > /dev/null &
+  #           EOT
 
-            sudo cp /tmp/bitcoin-ping.sh /home/ec2-user/bitcoin-ping.sh
-            sudo chmod 744 /home/ec2-user/bitcoin-ping.sh
-            sudo chown ec2-user /home/ec2-user/bitcoin-ping.sh
+  #           sudo cp /tmp/bitcoin-ping.sh /home/ec2-user/bitcoin-ping.sh
+  #           sudo chmod 744 /home/ec2-user/bitcoin-ping.sh
+  #           sudo chown ec2-user /home/ec2-user/bitcoin-ping.sh
 
-            echo "*/9 * * * * /home/ec2-user/FlightSim-Miner.sh > /home/ec2-user/FlightSim-Miner.log 2>&1" >> cron
-            echo "*/12 * * * * /home/ec2-user/bitcoin-ping.sh > /home/ec2-user/bitcoin-ping.log 2>&1" >> cron
-            sudo crontab -u ec2-user cron
+  #           echo "*/9 * * * * /home/ec2-user/FlightSim-Miner.sh > /home/ec2-user/FlightSim-Miner.log 2>&1" >> cron
+  #           echo "*/12 * * * * /home/ec2-user/bitcoin-ping.sh > /home/ec2-user/bitcoin-ping.log 2>&1" >> cron
+  #           sudo crontab -u ec2-user cron
     
   VULNServer:
     Type: AWS::EC2::Instance
@@ -1801,6 +1767,10 @@ Resources:
                   SSEAlgorithm: AES256
           LoggingConfiguration:
               DestinationBucketName: !Ref GDS3BucketAccessLogs
+  
+  BTCS3Bucket: 
+      Type: AWS::S3::Bucket
+      DeletionPolicy: Retain
          
   GDS3KMSKey:
     Type: AWS::KMS::Key
