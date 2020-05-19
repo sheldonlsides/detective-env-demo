@@ -28,7 +28,3 @@
 
 # creates new secret in secrets manaer
 # aws secretsmanager create-secret --name some_secret_content-$starttime --secret-string $secret_key --description "Stores some user secrets" --region $region
-
-# sleep 5
-# Deletes IAM user access key. User will not have access to the console or CLI (security cleanup)
-# aws iam delete-access-key --access-key-id $access_id --user-name $username
