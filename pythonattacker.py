@@ -7,7 +7,7 @@ secret_name = 'some_super_secret-' + str(some_random_number)
 
 response = secrets_manager.create_secret(
     Name=secret_name,
-    Description='A secret we created because your account was ccompromised',
+    Description='A secret we created because your account was compromised',
     SecretString='test'
 )
 
